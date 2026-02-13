@@ -2,6 +2,12 @@
 
 MCP server for Claude that provides tools to interact with the SuperOps.ai PSA/RMM platform using their GraphQL API.
 
+## One-Click Deployment
+
+[![Deploy to DO](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/wyre-technology/superops-mcp/tree/main)
+
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/wyre-technology/superops-mcp)
+
 ## Features
 
 - **Decision Tree Architecture**: Navigate to domains (clients, tickets, assets, technicians) to see relevant tools
