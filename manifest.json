@@ -1,0 +1,31 @@
+{
+  "manifest_version": "0.3",
+  "name": "superops-mcp",
+  "version": "0.0.1",
+  "display_name": "SuperOps MCP Server",
+  "description": "SuperOps.ai MCP server with decision tree architecture for Claude",
+  "author": { "name": "Aaron Sachs", "url": "https://github.com/asachs01" },
+  "repository": { "type": "git", "url": "https://github.com/wyre-technology/superops-mcp" },
+  "homepage": "https://github.com/wyre-technology/superops-mcp",
+  "license": "MIT",
+  "keywords": ["superops", "psa", "rmm", "msp", "it-management"],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"],
+      "env": {
+        "SUPEROPS_API_TOKEN": "${user_config.superops_api_token}",
+        "SUPEROPS_SUBDOMAIN": "${user_config.superops_subdomain}",
+        "MCP_TRANSPORT": "stdio"
+      }
+    }
+  },
+  "tools_generated": true,
+  "user_config": {
+    "superops_api_token": { "type": "string", "title": "SuperOps API Token", "description": "Your SuperOps API token", "required": true, "sensitive": true },
+    "superops_subdomain": { "type": "string", "title": "SuperOps Subdomain", "description": "Your SuperOps subdomain", "required": true }
+  },
+  "compatibility": { "platforms": ["darwin", "win32", "linux"], "runtimes": { "node": ">=18.0.0" }, "claude_desktop": ">=0.10.0" }
+}
