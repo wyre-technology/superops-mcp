@@ -1,31 +1,29 @@
 {
   "manifest_version": "0.3",
   "name": "superops-mcp",
-  "version": "0.0.1",
   "display_name": "SuperOps MCP Server",
-  "description": "SuperOps.ai MCP server with decision tree architecture for Claude",
-  "author": { "name": "Aaron Sachs", "url": "https://github.com/asachs01" },
+  "version": "0.0.0",
+  "description": "MCP server for SuperOps.ai - access tickets, clients, assets, and runbooks through AI assistants",
+  "long_description": "Provides AI assistants with structured access to your SuperOps.ai data. Manage tickets, clients, assets, runbooks, and patches through the Model Context Protocol.",
+  "author": { "name": "Wyre Technology", "url": "https://github.com/wyre-technology" },
   "repository": { "type": "git", "url": "https://github.com/wyre-technology/superops-mcp" },
   "homepage": "https://github.com/wyre-technology/superops-mcp",
-  "license": "MIT",
-  "keywords": ["superops", "psa", "rmm", "msp", "it-management"],
+  "license": "Apache-2.0",
+  "keywords": ["superops", "msp", "rmm", "psa", "tickets", "it-management"],
   "server": {
     "type": "node",
     "entry_point": "dist/index.js",
     "mcp_config": {
       "command": "node",
       "args": ["${__dirname}/dist/index.js"],
-      "env": {
-        "SUPEROPS_API_TOKEN": "${user_config.superops_api_token}",
-        "SUPEROPS_SUBDOMAIN": "${user_config.superops_subdomain}",
-        "MCP_TRANSPORT": "stdio"
-      }
+      "env": { "SUPEROPS_API_TOKEN": "${user_config.superops_api_token}", "SUPEROPS_SUBDOMAIN": "${user_config.superops_subdomain}", "SUPEROPS_REGION": "${user_config.superops_region}", "MCP_TRANSPORT": "stdio" }
     }
   },
   "tools_generated": true,
   "user_config": {
-    "superops_api_token": { "type": "string", "title": "SuperOps API Token", "description": "Your SuperOps API token", "required": true, "sensitive": true },
-    "superops_subdomain": { "type": "string", "title": "SuperOps Subdomain", "description": "Your SuperOps subdomain", "required": true }
+    "superops_api_token": { "type": "string", "title": "SuperOps API Token", "description": "Your SuperOps API token", "sensitive": true, "required": true },
+    "superops_subdomain": { "type": "string", "title": "SuperOps Subdomain", "description": "Your SuperOps subdomain", "sensitive": false, "required": true },
+    "superops_region": { "type": "string", "title": "SuperOps Region", "description": "Region: us or eu (default: us)", "sensitive": false, "required": false }
   },
   "compatibility": { "platforms": ["darwin", "win32", "linux"], "runtimes": { "node": ">=18.0.0" }, "claude_desktop": ">=0.10.0" }
 }
