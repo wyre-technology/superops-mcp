@@ -1,6 +1,6 @@
 {
   "name": "@wyre-technology/superops-mcp",
-  "version": "0.0.0-semantically-released",
+  "version": "1.1.0",
   "description": "SuperOps.ai MCP server for Claude with decision tree tool loading",
   "type": "module",
   "main": "dist/index.js",
