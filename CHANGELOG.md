@@ -1,3 +1,11 @@
+## [1.1.1](https://github.com/wyre-technology/superops-mcp/compare/v1.1.0...v1.1.1) (2026-02-23)
+
+
+### Bug Fixes
+
+* quote MCPB bundle filename to prevent shell glob expansion failure ([7d0845c](https://github.com/wyre-technology/superops-mcp/commit/7d0845c4cad3a4d723ac72c49bf7e87b39b21ed6))
+* rename duplicate step id 'version' to 'release-version' in docker job ([e8b035b](https://github.com/wyre-technology/superops-mcp/commit/e8b035b9d8f3a1a1b0dca1d096993563686b1d65))
+
 # [1.1.0](https://github.com/wyre-technology/superops-mcp/compare/v1.0.0...v1.1.0) (2026-02-18)
 
 
