@@ -1,3 +1,10 @@
+## [1.1.2](https://github.com/wyre-technology/superops-mcp/compare/v1.1.1...v1.1.2) (2026-02-26)
+
+
+### Bug Fixes
+
+* **ci:** move Discord notification into release workflow ([8193c5f](https://github.com/wyre-technology/superops-mcp/commit/8193c5f8e46ca27edde1fb3342ed18d23dd2f708))
+
 ## [1.1.1](https://github.com/wyre-technology/superops-mcp/compare/v1.1.0...v1.1.1) (2026-02-23)
 
 
