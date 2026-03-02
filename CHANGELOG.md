@@ -1,3 +1,10 @@
+## [1.1.3](https://github.com/wyre-technology/superops-mcp/compare/v1.1.2...v1.1.3) (2026-03-02)
+
+
+### Bug Fixes
+
+* **ci:** fix broken YAML in Discord notification step ([ccfb0f0](https://github.com/wyre-technology/superops-mcp/commit/ccfb0f0969266d8b64f2bc8598d725904408f5d9))
+
 ## [1.1.2](https://github.com/wyre-technology/superops-mcp/compare/v1.1.1...v1.1.2) (2026-02-26)
 
 
