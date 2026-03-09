@@ -6,6 +6,7 @@
 
 import { getClient } from "../client.js";
 import type { DomainTools, Ticket, ListInfo } from "../types.js";
+import { elicitText } from "../utils/elicitation.js";
 
 const LIST_TICKETS_QUERY = `
   query getTicketList($input: ListInfoInput!) {
@@ -403,6 +404,25 @@ export function getTicketsTools(): DomainTools {
               max?: number;
               cursor?: string;
             };
+
+            // If no filters provided, elicit a date range from the user
+            const hasFilters =
+              params.status ||
+              params.priority ||
+              params.clientId ||
+              params.assigneeId ||
+              params.unassigned;
+
+            if (!hasFilters && !params.cursor) {
+              const statusChoice = await elicitText(
+                "No filters specified. Would you like to narrow by ticket status?",
+                "status",
+                "Enter status (Open, In Progress, Pending, Resolved, Closed) or leave blank for all"
+              );
+              if (statusChoice) {
+                params.status = statusChoice.split(",").map((s) => s.trim());
+              }
+            }
 
             const filter: Record<string, unknown> = {};
             if (params.status) filter.status = params.status;

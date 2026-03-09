@@ -27,6 +27,7 @@ import {
 
 import type { Domain, DomainTools, ToolDefinition } from "./types.js";
 import { getCredentials } from "./client.js";
+import { setServerRef } from "./utils/server-ref.js";
 
 // Current active domain (null = navigation mode)
 let currentDomain: Domain | null = null;
@@ -126,6 +127,7 @@ const server = new Server(
     },
   }
 );
+setServerRef(server);
 
 // List available tools based on current domain state
 server.setRequestHandler(ListToolsRequestSchema, async () => {
