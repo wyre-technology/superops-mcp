@@ -1,3 +1,10 @@
+## [1.2.3](https://github.com/wyre-technology/superops-mcp/compare/v1.2.2...v1.2.3) (2026-03-10)
+
+
+### Bug Fixes
+
+* **ci:** strip scope prefix from MCPB bundle filename ([a036691](https://github.com/wyre-technology/superops-mcp/commit/a0366916f6b5c1696b26d6f17f131c5e60f55298))
+
 ## [1.2.2](https://github.com/wyre-technology/superops-mcp/compare/v1.2.1...v1.2.2) (2026-03-10)
 
 
