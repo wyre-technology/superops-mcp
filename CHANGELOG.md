@@ -1,3 +1,10 @@
+## [1.2.1](https://github.com/wyre-technology/superops-mcp/compare/v1.2.0...v1.2.1) (2026-03-10)
+
+
+### Bug Fixes
+
+* **ci:** rename pack-mcpb.js to .cjs to fix require() in ESM scope ([f743d68](https://github.com/wyre-technology/superops-mcp/commit/f743d6862e04f54931838f9120ff806c781bb913))
+
 # [1.2.0](https://github.com/wyre-technology/superops-mcp/compare/v1.1.3...v1.2.0) (2026-03-10)
 
 
