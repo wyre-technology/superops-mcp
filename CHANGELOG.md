@@ -1,3 +1,10 @@
+## [1.2.2](https://github.com/wyre-technology/superops-mcp/compare/v1.2.1...v1.2.2) (2026-03-10)
+
+
+### Bug Fixes
+
+* **ci:** add npm ci before MCPB pack and grant contents:write to Docker job ([f692c4e](https://github.com/wyre-technology/superops-mcp/commit/f692c4e543e87fd4fdd96a197be72136bf467eda))
+
 ## [1.2.1](https://github.com/wyre-technology/superops-mcp/compare/v1.2.0...v1.2.1) (2026-03-10)
 
 
