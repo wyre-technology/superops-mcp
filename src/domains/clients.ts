@@ -6,6 +6,7 @@
 
 import { getClient } from "../client.js";
 import type { DomainTools, Client, ListInfo } from "../types.js";
+import { elicitText } from "../utils/elicitation.js";
 
 const LIST_CLIENTS_QUERY = `
   query getClientList($input: ListInfoInput!) {
@@ -200,6 +201,41 @@ export function getClientsTools(): DomainTools {
               max?: number;
               cursor?: string;
             };
+
+            // If no filters provided, elicit a search term from the user
+            const hasFilters = params.status || params.stage;
+            if (!hasFilters && !params.cursor) {
+              const searchTerm = await elicitText(
+                "No filters specified. Would you like to search for a specific client?",
+                "search",
+                "Enter a client name to search for, or leave blank to list all"
+              );
+              if (searchTerm) {
+                // Redirect to the search handler which supports name filtering
+                const searchResponse = await client.query<ListClientsResponse>(
+                  SEARCH_CLIENTS_QUERY,
+                  {
+                    input: {
+                      first: Math.min(params.max ?? 50, 500),
+                      filter: {
+                        or: [
+                          { name: { contains: searchTerm } },
+                          { emailDomains: { contains: searchTerm } },
+                        ],
+                      },
+                    },
+                  }
+                );
+                return {
+                  content: [
+                    {
+                      type: "text",
+                      text: JSON.stringify(searchResponse.getClientList, null, 2),
+                    },
+                  ],
+                };
+              }
+            }
 
             const filter: Record<string, unknown> = {};
             if (params.status) filter.status = params.status;
