@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/wyre-technology/superops-mcp/compare/v1.1.3...v1.2.0) (2026-03-10)
+
+
+### Features
+
+* **elicitation:** add MCP elicitation support with graceful fallback ([#1](https://github.com/wyre-technology/superops-mcp/issues/1)) ([ceb51d9](https://github.com/wyre-technology/superops-mcp/commit/ceb51d91f1509e7022bfda1f119c60131d7baf0b))
+
 ## [1.1.3](https://github.com/wyre-technology/superops-mcp/compare/v1.1.2...v1.1.3) (2026-03-02)
 
 
