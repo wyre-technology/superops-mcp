@@ -54,7 +54,7 @@ jobs:
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
-      contents: read
+      contents: write
       packages: write
     steps:
       - uses: actions/checkout@v4
@@ -104,6 +104,12 @@ jobs:
             echo "released=false" >> $GITHUB_OUTPUT
           fi
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies for MCPB pack
+        run: npm ci
       - name: Pack and upload MCPB bundle
         if: steps.release-version.outputs.released == 'true'
         env:
