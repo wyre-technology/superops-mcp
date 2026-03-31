@@ -1,3 +1,10 @@
+## [1.2.4](https://github.com/wyre-technology/superops-mcp/compare/v1.2.3...v1.2.4) (2026-03-31)
+
+
+### Bug Fixes
+
+* **deploy:** replace node_compat with nodejs_compat for Wrangler v4 ([5151468](https://github.com/wyre-technology/superops-mcp/commit/515146842d1c8802de6e4f4ed0446371c100a71e))
+
 ## [1.2.3](https://github.com/wyre-technology/superops-mcp/compare/v1.2.2...v1.2.3) (2026-03-10)
 
 
