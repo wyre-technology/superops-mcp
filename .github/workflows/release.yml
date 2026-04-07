@@ -175,8 +175,8 @@ jobs:
       - name: Deploy to Azure Container Apps
         run: |
           SHORT_SHA="${GITHUB_SHA::7}"
-          IMAGE="ghcr.io/${{ github.repository }}:sha-${SHORT_SHA}"
-          echo "Deploying $IMAGE to gwp-superops"
+          IMAGE="ghcr.io/${{ github.repository }}:latest"
+          echo "Deploying $IMAGE to gwp-superops (revision tag sha-${SHORT_SHA}-${GITHUB_RUN_ID})"
           az containerapp update \
             --name gwp-superops \
             --resource-group mcp-gateway-prod \
