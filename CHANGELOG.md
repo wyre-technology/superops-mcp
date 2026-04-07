@@ -1,3 +1,10 @@
+## [1.2.5](https://github.com/wyre-technology/superops-mcp/compare/v1.2.4...v1.2.5) (2026-04-07)
+
+
+### Bug Fixes
+
+* **ci:** deploy :latest tag, force revision via env var bump ([77b2448](https://github.com/wyre-technology/superops-mcp/commit/77b24487047acba1bafa64f1e8763ae18f93569c))
+
 ## [1.2.4](https://github.com/wyre-technology/superops-mcp/compare/v1.2.3...v1.2.4) (2026-03-31)
 
 
