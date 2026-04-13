@@ -4,12 +4,27 @@
  * Lazy-loaded client for making GraphQL requests to the SuperOps.ai API.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { SuperOpsCredentials, GraphQLResponse } from "./types.js";
 
 const API_ENDPOINTS = {
   us: "https://api.superops.ai/msp",
   eu: "https://euapi.superops.ai/msp",
 } as const;
+
+/**
+ * AsyncLocalStorage for per-request credential isolation in HTTP transport.
+ * When running behind the MCP gateway, each request gets its own credentials
+ * injected via headers — never stored in process.env or shared state.
+ */
+const credentialStore = new AsyncLocalStorage<SuperOpsCredentials>();
+
+/**
+ * Run a function with per-request credentials available via getCredentials()/getClient().
+ */
+export function runWithCredentials<T>(creds: SuperOpsCredentials, fn: () => T): T {
+  return credentialStore.run(creds, fn);
+}
 
 export class SuperOpsClient {
   private readonly apiToken: string;
@@ -82,6 +97,13 @@ export class SuperOpsError extends Error {
 let _client: SuperOpsClient | null = null;
 
 export function getCredentials(): SuperOpsCredentials | null {
+  // Per-request credentials from AsyncLocalStorage take priority (HTTP/gateway mode)
+  const requestCreds = credentialStore.getStore();
+  if (requestCreds) {
+    return requestCreds;
+  }
+
+  // Fall back to environment variables (stdio mode)
   const apiToken = process.env.SUPEROPS_API_TOKEN;
   const subdomain = process.env.SUPEROPS_SUBDOMAIN;
   const region = process.env.SUPEROPS_REGION as "us" | "eu" | undefined;
@@ -94,6 +116,13 @@ export function getCredentials(): SuperOpsCredentials | null {
 }
 
 export function getClient(): SuperOpsClient {
+  // Per-request credentials: always create a fresh client (no shared state)
+  const requestCreds = credentialStore.getStore();
+  if (requestCreds) {
+    return new SuperOpsClient(requestCreds);
+  }
+
+  // Stdio mode: use cached singleton
   if (!_client) {
     const creds = getCredentials();
     if (!creds) {
