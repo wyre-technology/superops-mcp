@@ -1,0 +1,63 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.wyre-technology/superops-mcp",
+  "title": "SuperOps",
+  "description": "MCP server for SuperOps unified PSA+RMM — clients, tickets, assets, and more.",
+  "repository": {
+    "url": "https://github.com/wyre-technology/superops-mcp",
+    "source": "github"
+  },
+  "version": "0.0.0",
+  "websiteUrl": "https://github.com/wyre-technology/superops-mcp",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/wyre-technology/superops-mcp:0.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "SUPEROPS_API_TOKEN",
+          "description": "SuperOps API token (Bearer) generated in the SuperOps admin console",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "SUPEROPS_SUBDOMAIN",
+          "description": "Your SuperOps account subdomain (e.g. 'acme' for acme.superops.com)",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "SUPEROPS_REGION",
+          "description": "SuperOps data center region (e.g. 'us', 'eu')",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "MCP_TRANSPORT",
+          "description": "Transport mode for the server. Set to 'stdio' for local CLI use; the image defaults to 'http' for gateway hosting.",
+          "isRequired": false,
+          "default": "stdio",
+          "format": "string"
+        },
+        {
+          "name": "AUTH_MODE",
+          "description": "Credential source: 'env' reads vars locally, 'gateway' expects header injection from the WYRE MCP Gateway.",
+          "isRequired": false,
+          "default": "env",
+          "format": "string"
+        },
+        {
+          "name": "LOG_LEVEL",
+          "description": "Log verbosity: debug, info, warn, error",
+          "isRequired": false,
+          "default": "info",
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}
