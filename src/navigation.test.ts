@@ -1,7 +1,8 @@
 /**
- * Navigation State Management Tests
+ * Navigation and Tool Discovery Tests
  *
- * Tests for domain navigation state, tool loading, and request handling.
+ * Tests for domain tool loading, discovery helpers, and request handling.
+ * Note: Navigation is now stateless - all tools are always available.
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
@@ -82,7 +83,7 @@ vi.mock("./domains/custom.js", () => ({
 import { getCredentials } from "./client.js";
 import { getClientsTools } from "./domains/clients.js";
 
-describe("Navigation State Management", () => {
+describe("Tool Discovery and Management", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -191,13 +192,13 @@ describe("Navigation State Management", () => {
       const navigationTool = {
         name: "superops_navigate",
         description:
-          "Navigate to a SuperOps.ai domain to access its tools. Available domains: clients (accounts/companies), tickets (service desk), assets (endpoints/devices), technicians (agents/teams), custom (advanced GraphQL queries).",
+          "Discover available SuperOps.ai tools by domain. Returns tool names and descriptions for the selected domain. All tools are callable at any time — this is a help/discovery aid, not a prerequisite.",
         inputSchema: {
           type: "object" as const,
           properties: {
             domain: {
               type: "string",
-              description: "The domain to navigate to",
+              description: "The domain to explore",
               enum: ["clients", "tickets", "assets", "technicians", "custom"],
             },
           },
@@ -209,19 +210,18 @@ describe("Navigation State Management", () => {
       expect(navigationTool.inputSchema.properties.domain.enum).toHaveLength(5);
     });
 
-    it("back tool has correct structure", () => {
-      const backTool = {
-        name: "superops_back",
-        description:
-          "Return to the main navigation menu to select a different domain.",
+    it("status tool has correct structure", () => {
+      const statusTool = {
+        name: "superops_status",
+        description: "Show credentials status and available domains",
         inputSchema: {
           type: "object" as const,
           properties: {},
         },
       };
 
-      expect(backTool.name).toBe("superops_back");
-      expect(Object.keys(backTool.inputSchema.properties)).toHaveLength(0);
+      expect(statusTool.name).toBe("superops_status");
+      expect(Object.keys(statusTool.inputSchema.properties)).toHaveLength(0);
     });
 
     it("test connection tool has correct structure", () => {
@@ -278,7 +278,7 @@ describe("Navigation State Management", () => {
         content: [
           {
             type: "text",
-            text: `Unknown tool: ${toolName}. Use superops_navigate to explore available tools.`,
+            text: `Unknown tool: ${toolName}. Use superops_navigate to discover available tools by domain.`,
           },
         ],
         isError: true,
@@ -290,35 +290,36 @@ describe("Navigation State Management", () => {
   });
 
   describe("Success response format", () => {
-    it("formats navigation success correctly", () => {
+    it("formats navigation discovery correctly", () => {
       const domain = "clients";
       const tools = [{ name: "superops_clients_list", description: "List clients" }];
       const successResponse = {
         content: [
           {
             type: "text",
-            text: `Navigated to ${domain} domain. Available tools:\n\n${tools.map((t) => `- ${t.name}: ${t.description}`).join("\n")}\n\nUse superops_back to return to the main menu.`,
+            text: `Client/company management - list, get, search accounts and company information\n\nAvailable tools:\n${tools.map((t) => `- ${t.name}: ${t.description}`).join("\n")}\n\nYou can call any of these tools directly.`,
           },
         ],
       };
 
-      expect(successResponse.content[0].text).toContain("Navigated to clients domain");
+      expect(successResponse.content[0].text).toContain("Client/company management");
       expect(successResponse.content[0].text).toContain("superops_clients_list");
+      expect(successResponse.content[0].text).toContain("You can call any of these tools directly");
     });
 
-    it("formats back navigation correctly", () => {
-      const backResponse = {
+    it("formats status response correctly", () => {
+      const statusResponse = {
         content: [
           {
             type: "text",
-            text: "Returned to main navigation. Use superops_navigate to select a domain:\n\n- clients: Manage client accounts and contacts\n- tickets: Service desk and ticket management\n- assets: Endpoint inventory and RMM\n- technicians: Agent and team management\n- custom: Advanced GraphQL queries",
+            text: "SuperOps.ai MCP Server Status\n\nCredentials: Configured (subdomain: test-company, region: us)\nAvailable domains: clients, tickets, assets, technicians, custom\n\nAll tools are available at all times. Use superops_navigate to discover tools by domain.",
           },
         ],
       };
 
-      expect(backResponse.content[0].text).toContain("Returned to main navigation");
-      expect(backResponse.content[0].text).toContain("clients");
-      expect(backResponse.content[0].text).toContain("tickets");
+      expect(statusResponse.content[0].text).toContain("SuperOps.ai MCP Server Status");
+      expect(statusResponse.content[0].text).toContain("All tools are available at all times");
+      expect(statusResponse.content[0].text).toContain("clients, tickets, assets, technicians, custom");
     });
   });
 });
