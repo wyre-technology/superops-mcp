@@ -3,12 +3,14 @@
  * SuperOps.ai MCP Server
  *
  * This MCP server provides tools for interacting with SuperOps.ai PSA/RMM API.
- * It uses a decision tree architecture for tool loading - Claude first navigates
- * to a domain, then domain-specific tools become available.
+ * All tools are listed upfront so they work with every MCP client, including
+ * remote connectors (claude.ai, mcp-remote) that do not support dynamic
+ * tool-list changes. A helper `superops_navigate` tool provides domain
+ * discovery and guidance.
  *
  * Features:
- * - Decision tree tool loading for reduced cognitive load
- * - Lazy loading of domain modules for faster startup
+ * - All tools available immediately for broad MCP client compatibility
+ * - Domain-based tool organization with navigation helper
  * - GraphQL-based API communication
  * - Bearer token authentication
  *
@@ -50,11 +52,11 @@ import type { Domain, DomainTools, ToolDefinition } from "./types.js";
 import { getCredentials, resetClient, runWithCredentials } from "./client.js";
 import { setServerRef } from "./utils/server-ref.js";
 
-// Current active domain (null = navigation mode)
-let currentDomain: Domain | null = null;
-
 // Lazy-loaded domain modules
 const domainCache = new Map<Domain, DomainTools>();
+
+// All domain tools, collected once at startup
+let allDomainTools: ToolDefinition[] | null = null;
 
 async function loadDomain(domain: Domain): Promise<DomainTools> {
   const cached = domainCache.get(domain);
@@ -97,17 +99,53 @@ async function loadDomain(domain: Domain): Promise<DomainTools> {
   return tools;
 }
 
-// Navigation tool definition
+/**
+ * Domain metadata for navigation
+ */
+const domainDescriptions: Record<Domain, string> = {
+  clients: "Client/company management - list, get, search accounts and company information",
+  tickets: "Ticket management - list, get, create tickets and manage support workflow",
+  assets: "Asset management - list and get hardware/software assets, endpoint inventory",
+  technicians: "Technician management - list and get support staff and technician information",
+  custom: "Custom queries - execute advanced GraphQL queries with full API access",
+};
+
+/**
+ * Load all domain tools (lazy-loaded on first access)
+ */
+async function getAllDomainTools(): Promise<ToolDefinition[]> {
+  if (allDomainTools !== null) {
+    return allDomainTools;
+  }
+
+  const domains: Domain[] = ["clients", "tickets", "assets", "technicians", "custom"];
+  const tools: ToolDefinition[] = [];
+
+  for (const domain of domains) {
+    const domainTools = await loadDomain(domain);
+    tools.push(...domainTools.tools);
+  }
+
+  allDomainTools = tools;
+  return tools;
+}
+
+// Navigation / discovery tool - helps the LLM find the right tools
 const navigationTool: ToolDefinition = {
   name: "superops_navigate",
   description:
-    "Navigate to a SuperOps.ai domain to access its tools. Available domains: clients (accounts/companies), tickets (service desk), assets (endpoints/devices), technicians (agents/teams), custom (advanced GraphQL queries).",
+    "Discover available SuperOps.ai tools by domain. Returns tool names and descriptions for the selected domain. All tools are callable at any time — this is a help/discovery aid, not a prerequisite.",
   inputSchema: {
     type: "object",
     properties: {
       domain: {
         type: "string",
-        description: "The domain to navigate to",
+        description: `The domain to explore:
+- clients: ${domainDescriptions.clients}
+- tickets: ${domainDescriptions.tickets}
+- assets: ${domainDescriptions.assets}
+- technicians: ${domainDescriptions.technicians}
+- custom: ${domainDescriptions.custom}`,
         enum: ["clients", "tickets", "assets", "technicians", "custom"],
       },
     },
@@ -115,11 +153,10 @@ const navigationTool: ToolDefinition = {
   },
 };
 
-// Back/reset tool definition
-const backTool: ToolDefinition = {
-  name: "superops_back",
-  description:
-    "Return to the main navigation menu to select a different domain.",
+// Status tool - shows credentials status and available domains
+const statusTool: ToolDefinition = {
+  name: "superops_status",
+  description: "Show credentials status and available domains",
   inputSchema: {
     type: "object",
     properties: {},
@@ -154,19 +191,10 @@ function createMcpServer(): Server {
   );
   setServerRef(server);
 
-  // List available tools based on current domain state
+  // List available tools - always returns ALL tools for MCP client compatibility
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const tools: ToolDefinition[] = [testConnectionTool];
-
-    if (currentDomain === null) {
-      tools.push(navigationTool);
-    } else {
-      tools.push(backTool);
-      const domainTools = await loadDomain(currentDomain);
-      tools.push(...domainTools.tools);
-    }
-
-    return { tools };
+    const domainTools = await getAllDomainTools();
+    return { tools: [navigationTool, statusTool, testConnectionTool, ...domainTools] };
   });
 
   // Handle tool calls
@@ -220,7 +248,7 @@ function createMcpServer(): Server {
       }
     }
 
-    // Handle navigation
+    // Handle navigation / discovery helper
     if (name === "superops_navigate") {
       const { domain } = (args ?? {}) as { domain?: string };
       const validDomains: Domain[] = [
@@ -243,27 +271,33 @@ function createMcpServer(): Server {
         };
       }
 
-      currentDomain = domain as Domain;
-      const domainTools = await loadDomain(currentDomain);
+      const domainTools = await loadDomain(domain as Domain);
+      const toolSummary = domainTools.tools
+        .map((t) => `- ${t.name}: ${t.description}`)
+        .join("\n");
 
       return {
         content: [
           {
             type: "text",
-            text: `Navigated to ${domain} domain. Available tools:\n\n${domainTools.tools.map((t) => `- ${t.name}: ${t.description}`).join("\n")}\n\nUse superops_back to return to the main menu.`,
+            text: `${domainDescriptions[domain as Domain]}\n\nAvailable tools:\n${toolSummary}\n\nYou can call any of these tools directly.`,
           },
         ],
       };
     }
 
-    // Handle back
-    if (name === "superops_back") {
-      currentDomain = null;
+    // Handle status
+    if (name === "superops_status") {
+      const creds = getCredentials();
+      const credStatus = creds
+        ? `Configured (subdomain: ${creds.subdomain}, region: ${creds.region ?? "us"})`
+        : "NOT CONFIGURED - Please set SUPEROPS_API_TOKEN and SUPEROPS_SUBDOMAIN environment variables";
+
       return {
         content: [
           {
             type: "text",
-            text: "Returned to main navigation. Use superops_navigate to select a domain:\n\n- clients: Manage client accounts and contacts\n- tickets: Service desk and ticket management\n- assets: Endpoint inventory and RMM\n- technicians: Agent and team management\n- custom: Advanced GraphQL queries",
+            text: `SuperOps.ai MCP Server Status\n\nCredentials: ${credStatus}\nAvailable domains: ${Object.keys(domainDescriptions).join(", ")}\n\nAll tools are available at all times. Use superops_navigate to discover tools by domain.`,
           },
         ],
       };
@@ -283,46 +317,36 @@ function createMcpServer(): Server {
       };
     }
 
-    // Handle domain-specific tools
-    if (currentDomain) {
-      const domainTools = await loadDomain(currentDomain);
-      const toolBelongsToDomain = domainTools.tools.some(
-        (t) => t.name === name
-      );
-      if (toolBelongsToDomain) {
-        return domainTools.handleCall(
-          name,
-          (args ?? {}) as Record<string, unknown>
-        );
-      }
+    // Route to appropriate domain handler based on tool name prefix
+    const toolArgs = (args ?? {}) as Record<string, unknown>;
+
+    if (name.startsWith("superops_clients_")) {
+      const domainTools = await loadDomain("clients");
+      return domainTools.handleCall(name, toolArgs);
+    }
+    if (name.startsWith("superops_tickets_")) {
+      const domainTools = await loadDomain("tickets");
+      return domainTools.handleCall(name, toolArgs);
+    }
+    if (name.startsWith("superops_assets_")) {
+      const domainTools = await loadDomain("assets");
+      return domainTools.handleCall(name, toolArgs);
+    }
+    if (name.startsWith("superops_technicians_")) {
+      const domainTools = await loadDomain("technicians");
+      return domainTools.handleCall(name, toolArgs);
+    }
+    if (name.startsWith("superops_custom_")) {
+      const domainTools = await loadDomain("custom");
+      return domainTools.handleCall(name, toolArgs);
     }
 
-    // Try to find the tool in any domain (for direct access)
-    const allDomains: Domain[] = [
-      "clients",
-      "tickets",
-      "assets",
-      "technicians",
-      "custom",
-    ];
-
-    for (const domain of allDomains) {
-      const domainTools = await loadDomain(domain);
-      const toolExists = domainTools.tools.some((t) => t.name === name);
-      if (toolExists) {
-        currentDomain = domain;
-        return domainTools.handleCall(
-          name,
-          (args ?? {}) as Record<string, unknown>
-        );
-      }
-    }
-
+    // Unknown tool
     return {
       content: [
         {
           type: "text",
-          text: `Unknown tool: ${name}. Use superops_navigate to explore available tools.`,
+          text: `Unknown tool: ${name}. Use superops_navigate to discover available tools by domain.`,
         },
       ],
       isError: true,
@@ -339,7 +363,7 @@ async function startStdioTransport(): Promise<void> {
   const server = createMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("SuperOps.ai MCP server running on stdio");
+  console.error("SuperOps.ai MCP server running on stdio (all tools available)");
 }
 
 /**
