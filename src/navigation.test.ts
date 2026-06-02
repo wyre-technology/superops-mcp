@@ -291,7 +291,6 @@ describe("Tool Discovery and Management", () => {
 
   describe("Success response format", () => {
     it("formats navigation discovery correctly", () => {
-      const domain = "clients";
       const tools = [{ name: "superops_clients_list", description: "List clients" }];
       const successResponse = {
         content: [

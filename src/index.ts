@@ -49,7 +49,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import type { Domain, DomainTools, ToolDefinition } from "./types.js";
-import { getCredentials, resetClient, runWithCredentials } from "./client.js";
+import { getCredentials, runWithCredentials } from "./client.js";
 import { setServerRef } from "./utils/server-ref.js";
 
 // Lazy-loaded domain modules
