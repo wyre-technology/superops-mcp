@@ -1,3 +1,19 @@
+## [Unreleased]
+
+### Fixed
+
+- **deploy:** authenticate GitHub Packages in one-click cloud builds. Added the
+  `_authToken` line to `.npmrc`, a build-time `GITHUB_TOKEN` secret to the
+  DigitalOcean app template, and `ARG GITHUB_TOKEN` + temporary authenticated
+  `.npmrc` to the Dockerfile so `npm ci` can resolve `@wyre-technology/*`
+  packages during Cloudflare/DigitalOcean deploys.
+
+### Changed
+
+- **release:** publish the package to GitHub Packages (`npmPublish: true` plus a
+  `publishConfig` registry) so the `@wyre-technology/superops-mcp` package is
+  available to install.
+
 ## [1.2.5](https://github.com/wyre-technology/superops-mcp/compare/v1.2.4...v1.2.5) (2026-04-07)
 
 

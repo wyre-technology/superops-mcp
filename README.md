@@ -8,6 +8,17 @@ MCP server for Claude that provides tools to interact with the SuperOps.ai PSA/R
 
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/wyre-technology/superops-mcp)
 
+> **Operator note — GitHub Packages authentication.** This package is published
+> to the `@wyre-technology` scope on **GitHub Packages**, which requires an
+> authentication token on every install (GitHub Packages has no anonymous reads,
+> even for public packages). Create a GitHub **Personal Access Token** with the
+> `read:packages` scope and supply it to the cloud builder:
+>
+> - **Cloudflare Workers** — set a build variable named `NODE_AUTH_TOKEN` to your PAT.
+> - **DigitalOcean App Platform** — set a **build-time** secret named `GITHUB_TOKEN` to your PAT.
+>
+> For local installs, run `export NODE_AUTH_TOKEN=$(gh auth token)` before `npm install`.
+
 ## Features
 
 - **Decision Tree Architecture**: Navigate to domains (clients, tickets, assets, technicians) to see relevant tools
@@ -18,6 +29,8 @@ MCP server for Claude that provides tools to interact with the SuperOps.ai PSA/R
 ## Installation
 
 ```bash
+# The @wyre-technology scope lives on GitHub Packages and needs a token to install:
+export NODE_AUTH_TOKEN=$(gh auth token)
 npm install @wyre-technology/superops-mcp
 ```
 
