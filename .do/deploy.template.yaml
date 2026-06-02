@@ -12,6 +12,9 @@ spec:
     instance_count: 1
     instance_size_slug: basic-xxs
     envs:
+    - key: GITHUB_TOKEN
+      scope: BUILD_TIME
+      type: SECRET
     - key: MCP_TRANSPORT
       value: "http"
       scope: RUN_TIME
