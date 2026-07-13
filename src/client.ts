@@ -12,6 +12,31 @@ const API_ENDPOINTS = {
   eu: "https://euapi.superops.ai/msp",
 } as const;
 
+// An unresolved MCPB/DXT manifest placeholder, e.g. "${user_config.superops_region}".
+// Desktop hosts inject the config template verbatim when its optional user_config
+// field is left blank, so the literal string arrives in the env var / header.
+const CONFIG_PLACEHOLDER = /^\$\{.*\}$/;
+
+/**
+ * Normalise a single credential read from an env var.
+ *
+ * Returns `undefined` for values that are effectively absent, so callers treat
+ * them as "no credential" rather than a real value:
+ *   - undefined / empty / whitespace-only
+ *   - an unresolved manifest placeholder like `${user_config.superops_region}`
+ *
+ * Root cause of issue #73: a blank optional SUPEROPS_REGION field left the
+ * literal `${user_config.superops_region}` in the env var. That truthy string
+ * defeated the `?? "us"` default, so `API_ENDPOINTS[region]` returned undefined
+ * and every `fetch(this.endpoint, ...)` threw "Failed to parse URL". Stripping
+ * the placeholder here lets the "us" default apply.
+ */
+export function cleanCredential(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed || CONFIG_PLACEHOLDER.test(trimmed)) return undefined;
+  return trimmed;
+}
+
 /**
  * AsyncLocalStorage for per-request credential isolation in HTTP transport.
  * When running behind the MCP gateway, each request gets its own credentials
@@ -103,10 +128,14 @@ export function getCredentials(): SuperOpsCredentials | null {
     return requestCreds;
   }
 
-  // Fall back to environment variables (stdio mode)
-  const apiToken = process.env.SUPEROPS_API_TOKEN;
-  const subdomain = process.env.SUPEROPS_SUBDOMAIN;
-  const region = process.env.SUPEROPS_REGION as "us" | "eu" | undefined;
+  // Fall back to environment variables (stdio mode). Sanitise at ingress so an
+  // unresolved MCPB placeholder or blank field is treated as absent (issue #73).
+  const apiToken = cleanCredential(process.env.SUPEROPS_API_TOKEN);
+  const subdomain = cleanCredential(process.env.SUPEROPS_SUBDOMAIN);
+  // SUPEROPS_REGION only supports "us"/"eu"; anything else (including a stripped
+  // placeholder) coerces to undefined so the constructor's `?? "us"` applies.
+  const rawRegion = cleanCredential(process.env.SUPEROPS_REGION);
+  const region = rawRegion === "eu" ? "eu" : rawRegion === "us" ? "us" : undefined;
 
   if (!apiToken || !subdomain) {
     return null;
