@@ -1,5 +1,5 @@
 # Multi-stage build for efficient container size
-FROM node:22-alpine AS builder
+FROM node:26-alpine AS builder
 
 ARG VERSION="unknown"
 ARG COMMIT_SHA="unknown"
@@ -17,7 +17,7 @@ RUN echo "@wyre-technology:registry=https://npm.pkg.github.com" > .npmrc && \
 COPY . .
 RUN npm run build
 
-FROM node:22-alpine AS production
+FROM node:26-alpine AS production
 
 RUN addgroup -g 1001 -S superops && \
     adduser -S superops -u 1001 -G superops
