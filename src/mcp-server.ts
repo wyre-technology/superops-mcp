@@ -19,6 +19,7 @@ import {
 import type { Domain, DomainTools, ToolDefinition } from "./types.js";
 import { getCredentials } from "./client.js";
 import { setServerRef } from "./utils/server-ref.js";
+import { registerResourceHandlers } from "./resources.js";
 
 // Lazy-loaded domain modules
 const domainCache = new Map<Domain, DomainTools>();
@@ -193,10 +194,12 @@ export function createMcpServer(): Server {
     {
       capabilities: {
         tools: {},
+        resources: {},
       },
     }
   );
   setServerRef(server);
+  registerResourceHandlers(server);
 
   // List available tools - always returns ALL tools for MCP client compatibility
   server.setRequestHandler(ListToolsRequestSchema, async () => {

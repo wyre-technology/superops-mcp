@@ -7,6 +7,7 @@
 import { getClient } from "../client.js";
 import type { DomainTools, Ticket, ListInfo } from "../types.js";
 import { elicitText } from "../utils/elicitation.js";
+import { buildTicketCard, TICKET_CARD_META } from "../card.builder.js";
 
 const LIST_TICKETS_QUERY = `
   query getTicketList($input: ListInfoInput!) {
@@ -246,6 +247,7 @@ export function getTicketsTools(): DomainTools {
       {
         name: "superops_tickets_get",
         description: "Get detailed information for a specific ticket by its ID.",
+        _meta: TICKET_CARD_META,
         inputSchema: {
           type: "object",
           properties: {
@@ -336,6 +338,7 @@ export function getTicketsTools(): DomainTools {
       {
         name: "superops_tickets_add_note",
         description: "Add a note to a ticket. Can be internal or public (visible to client).",
+        _meta: TICKET_CARD_META,
         inputSchema: {
           type: "object",
           properties: {
@@ -457,11 +460,18 @@ export function getTicketsTools(): DomainTools {
               input: { ticketId },
             });
 
+            // MCP Apps: attach the normalized card payload the ui:// ticket
+            // card renders from. Best-effort — a null card just means no UI
+            // surface; the model-visible JSON is otherwise unchanged.
+            const payload: Record<string, unknown> = { ...response.getTicket };
+            const card = buildTicketCard(payload);
+            if (card) payload._card = card;
+
             return {
               content: [
                 {
                   type: "text",
-                  text: JSON.stringify(response.getTicket, null, 2),
+                  text: JSON.stringify(payload, null, 2),
                 },
               ],
             };
