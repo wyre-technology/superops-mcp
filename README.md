@@ -25,6 +25,18 @@ MCP server for Claude that provides tools to interact with the SuperOps.ai PSA/R
 - **Lazy Loading**: Domain modules load on-demand for faster startup
 - **Full CRUD Operations**: List, get, create, and update entities
 - **GraphQL Support**: Use custom queries for advanced operations
+- **Interactive Ticket Card (MCP Apps)**: ticket results render as an interactive card in MCP Apps hosts — neutral by default, brandable via `window.__BRAND__` injection or `MCP_BRAND_*` env vars
+
+### Interactive Ticket Card (MCP Apps)
+
+`superops_tickets_get` renders as an interactive card in MCP Apps hosts
+(Claude Desktop/web) with an in-card "Add note" round-trip via
+`superops_tickets_add_note` that always posts internal-only notes
+(`isPublic: false`); plain-JSON behavior is unchanged in other hosts.
+The card is neutral by default and brandable via `window.__BRAND__` injection
+or `MCP_BRAND_*` env vars (`MCP_BRAND_NAME`, `MCP_BRAND_LOGO_URL`,
+`MCP_BRAND_PRIMARY_COLOR`, `MCP_BRAND_ACCENT_COLOR`, `MCP_BRAND_BG`,
+`MCP_BRAND_TEXT`) — no rebuild needed.
 
 ## Installation
 

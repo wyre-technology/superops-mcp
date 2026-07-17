@@ -213,6 +213,8 @@ export interface ToolDefinition {
     properties: Record<string, unknown>;
     required?: string[];
   };
+  /** MCP Apps (SEP-1865): advertises a ui:// resource for renderable tools. */
+  _meta?: Record<string, unknown>;
 }
 
 export type Domain = "clients" | "tickets" | "assets" | "technicians" | "custom";
