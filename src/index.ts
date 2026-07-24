@@ -43,12 +43,17 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 
 import { getCredentials, runWithCredentials } from "./client.js";
 import { createMcpServer } from "./mcp-server.js";
+import { runWithServerRef, bindServerRef } from "./utils/server-ref.js";
 
 /**
  * Start the server with stdio transport (default).
  */
 async function startStdioTransport(): Promise<void> {
   const server = createMcpServer();
+  // stdio is single-session (one process = one caller), so there is no
+  // concurrent tenant to isolate from — bind once for the process
+  // lifetime rather than per-request. See utils/server-ref.ts.
+  bindServerRef(server);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("SuperOps.ai MCP server running on stdio (all tools available)");
@@ -128,22 +133,34 @@ async function startHttpTransport(): Promise<void> {
               sessionIdGenerator: () => randomUUID(),
               enableJsonResponse: true,
             });
-            await perRequestServer.connect(transport);
-            await transport.handleRequest(req, res);
-            await perRequestServer.close();
+            // Bind this request's server into the per-request async context
+            // (not a module-level global) so elicitation helpers resolve
+            // *this* server/transport even after await gaps, and never a
+            // concurrent request's — see utils/server-ref.ts.
+            await runWithServerRef(perRequestServer, async () => {
+              await perRequestServer.connect(transport);
+              await transport.handleRequest(req, res);
+              await perRequestServer.close();
+            });
           });
           return;
         }
 
-        // Non-gateway mode: single server, env-var credentials
+        // Non-gateway mode: single server, env-var credentials. Still one
+        // fresh Server per inbound request, so the server ref must still be
+        // scoped per request (see utils/server-ref.ts) — otherwise two
+        // concurrent requests in this mode could misroute elicitation
+        // prompts between each other too.
         const perRequestServer = createMcpServer();
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           enableJsonResponse: true,
         });
-        await perRequestServer.connect(transport);
-        await transport.handleRequest(req, res);
-        await perRequestServer.close();
+        await runWithServerRef(perRequestServer, async () => {
+          await perRequestServer.connect(transport);
+          await transport.handleRequest(req, res);
+          await perRequestServer.close();
+        });
         return;
       }
 

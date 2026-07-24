@@ -28,6 +28,7 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { runWithCredentials } from "./client.js";
 import { createMcpServer, resolveGatewayCredentials } from "./mcp-server.js";
+import { runWithServerRef } from "./utils/server-ref.js";
 import type { SuperOpsCredentials } from "./types.js";
 
 export interface Env {
@@ -65,7 +66,11 @@ function withCors(res: Response): Response {
 
 /**
  * Run the MCP request through a fresh server + Web Standard transport.
- * Stateless: a new server/transport pair is created per request.
+ * Stateless: a new server/transport pair is created per request. The
+ * server is bound to the per-request async context (not a module-level
+ * global) so elicitation helpers resolve *this* request's server even
+ * after await gaps, and never a concurrent request's — see
+ * utils/server-ref.ts.
  */
 async function handleMcp(request: Request): Promise<Response> {
   const server = createMcpServer();
@@ -73,15 +78,18 @@ async function handleMcp(request: Request): Promise<Response> {
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
   });
-  await server.connect(transport);
 
-  try {
-    const response = await transport.handleRequest(request);
-    return withCors(response);
-  } finally {
-    await transport.close();
-    await server.close();
-  }
+  return runWithServerRef(server, async () => {
+    await server.connect(transport);
+
+    try {
+      const response = await transport.handleRequest(request);
+      return withCors(response);
+    } finally {
+      await transport.close();
+      await server.close();
+    }
+  });
 }
 
 export default {
