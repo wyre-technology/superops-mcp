@@ -18,7 +18,6 @@ import {
 
 import type { Domain, DomainTools, ToolDefinition } from "./types.js";
 import { getCredentials } from "./client.js";
-import { setServerRef } from "./utils/server-ref.js";
 import { registerResourceHandlers } from "./resources.js";
 
 // Lazy-loaded domain modules
@@ -184,6 +183,12 @@ export function resolveGatewayCredentials(
 /**
  * Create and configure an MCP Server instance with all request handlers.
  * Called once for stdio, or per-request for HTTP / Workers transports.
+ *
+ * The returned server is NOT registered as "the" server anywhere here —
+ * callers are responsible for binding it into the per-request `server-ref`
+ * AsyncLocalStorage context (via `runWithServerRef` / `bindServerRef`) so
+ * elicitation helpers resolve the right server even after await gaps. See
+ * `utils/server-ref.ts` for why this matters.
  */
 export function createMcpServer(): Server {
   const server = new Server(
@@ -198,7 +203,6 @@ export function createMcpServer(): Server {
       },
     }
   );
-  setServerRef(server);
   registerResourceHandlers(server);
 
   // List available tools - always returns ALL tools for MCP client compatibility
