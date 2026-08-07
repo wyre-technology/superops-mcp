@@ -37,7 +37,6 @@ import {
   IncomingMessage,
   ServerResponse,
 } from "node:http";
-import { randomUUID } from "node:crypto";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
@@ -130,7 +129,7 @@ async function startHttpTransport(): Promise<void> {
           await runWithCredentials(creds, async () => {
             const perRequestServer = createMcpServer();
             const transport = new StreamableHTTPServerTransport({
-              sessionIdGenerator: () => randomUUID(),
+              sessionIdGenerator: undefined,
               enableJsonResponse: true,
             });
             // Bind this request's server into the per-request async context
@@ -153,7 +152,7 @@ async function startHttpTransport(): Promise<void> {
         // prompts between each other too.
         const perRequestServer = createMcpServer();
         const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => randomUUID(),
+          sessionIdGenerator: undefined,
           enableJsonResponse: true,
         });
         await runWithServerRef(perRequestServer, async () => {
