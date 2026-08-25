@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: production
-    image: ghcr.io/wyre-technology/superops-mcp:latest
+    image: ghcr.io/wyre-ai/superops-mcp:latest
     container_name: superops-mcp-server
     restart: unless-stopped
     ports:

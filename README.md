@@ -4,12 +4,12 @@ MCP server for Claude that provides tools to interact with the SuperOps.ai PSA/R
 
 ## One-Click Deployment
 
-[![Deploy to DO](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/wyre-technology/superops-mcp/tree/main)
+[![Deploy to DO](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/WYRE-AI/superops-mcp/tree/main)
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/wyre-technology/superops-mcp)
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/WYRE-AI/superops-mcp)
 
 > **Operator note — GitHub Packages authentication.** This package is published
-> to the `@wyre-technology` scope on **GitHub Packages**, which requires an
+> to the `@wyre-ai` scope on **GitHub Packages**, which requires an
 > authentication token on every install (GitHub Packages has no anonymous reads,
 > even for public packages). Create a GitHub **Personal Access Token** with the
 > `read:packages` scope and supply it to the cloud builder:
@@ -41,9 +41,9 @@ or `MCP_BRAND_*` env vars (`MCP_BRAND_NAME`, `MCP_BRAND_LOGO_URL`,
 ## Installation
 
 ```bash
-# The @wyre-technology scope lives on GitHub Packages and needs a token to install:
+# The @wyre-ai scope lives on GitHub Packages and needs a token to install:
 export NODE_AUTH_TOKEN=$(gh auth token)
-npm install @wyre-technology/superops-mcp
+npm install @wyre-ai/superops-mcp
 ```
 
 ## Configuration
@@ -73,7 +73,7 @@ Add to your `claude_desktop_config.json`:
   "mcpServers": {
     "superops": {
       "command": "npx",
-      "args": ["@wyre-technology/superops-mcp"],
+      "args": ["@wyre-ai/superops-mcp"],
       "env": {
         "SUPEROPS_API_TOKEN": "your-api-token",
         "SUPEROPS_SUBDOMAIN": "yourcompany",
@@ -150,4 +150,4 @@ Apache-2.0
 
 ## Support
 
-For issues and feature requests, please visit the [GitHub repository](https://github.com/wyre-technology/superops-mcp/issues).
+For issues and feature requests, please visit the [GitHub repository](https://github.com/WYRE-AI/superops-mcp/issues).

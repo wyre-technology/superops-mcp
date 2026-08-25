@@ -3,7 +3,7 @@ spec:
   services:
   - name: superops-mcp
     github:
-      repo: wyre-technology/superops-mcp
+      repo: WYRE-AI/superops-mcp
       branch: main
       deploy_on_push: true
     source_dir: /

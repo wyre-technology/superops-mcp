@@ -5,9 +5,9 @@
   "version": "0.0.0",
   "description": "MCP server for SuperOps.ai - access tickets, clients, assets, and runbooks through AI assistants",
   "long_description": "Provides AI assistants with structured access to your SuperOps.ai data. Manage tickets, clients, assets, runbooks, and patches through the Model Context Protocol.",
-  "author": { "name": "Wyre Technology", "url": "https://github.com/wyre-technology" },
-  "repository": { "type": "git", "url": "https://github.com/wyre-technology/superops-mcp" },
-  "homepage": "https://github.com/wyre-technology/superops-mcp",
+  "author": { "name": "Wyre Technology", "url": "https://github.com/WYRE-AI" },
+  "repository": { "type": "git", "url": "https://github.com/WYRE-AI/superops-mcp" },
+  "homepage": "https://github.com/WYRE-AI/superops-mcp",
   "license": "Apache-2.0",
   "keywords": ["superops", "msp", "rmm", "psa", "tickets", "it-management"],
   "server": {

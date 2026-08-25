@@ -4,13 +4,13 @@ FROM node:26-alpine AS builder
 ARG VERSION="unknown"
 ARG COMMIT_SHA="unknown"
 ARG BUILD_DATE="unknown"
-# GitHub PAT with read:packages, used only to install @wyre-technology/* from
+# GitHub PAT with read:packages, used only to install @wyre-ai/* from
 # GitHub Packages. Passed as a build-time secret; never baked into the image.
 ARG GITHUB_TOKEN=""
 
 WORKDIR /app
 COPY package*.json ./
-RUN echo "@wyre-technology:registry=https://npm.pkg.github.com" > .npmrc && \
+RUN echo "@wyre-ai:registry=https://npm.pkg.github.com" > .npmrc && \
     echo "//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}" >> .npmrc && \
     npm ci --ignore-scripts && \
     rm -f .npmrc
@@ -47,7 +47,7 @@ CMD ["node", "dist/index.js"]
 LABEL maintainer="engineering@wyre.ai"
 LABEL description="SuperOps MCP Server"
 LABEL org.opencontainers.image.title="superops-mcp"
-LABEL org.opencontainers.image.source="https://github.com/wyre-technology/superops-mcp"
+LABEL org.opencontainers.image.source="https://github.com/WYRE-AI/superops-mcp"
 LABEL org.opencontainers.image.vendor="Wyre Technology"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
-LABEL io.modelcontextprotocol.server.name="io.github.wyre-technology/superops-mcp"
+LABEL io.modelcontextprotocol.server.name="io.github.WYRE-AI/superops-mcp"
