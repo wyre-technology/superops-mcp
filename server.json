@@ -1,18 +1,18 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.wyre-technology/superops-mcp",
+  "name": "io.github.WYRE-AI/superops-mcp",
   "title": "SuperOps",
   "description": "MCP server for SuperOps unified PSA+RMM — clients, tickets, assets, and more.",
   "repository": {
-    "url": "https://github.com/wyre-technology/superops-mcp",
+    "url": "https://github.com/WYRE-AI/superops-mcp",
     "source": "github"
   },
   "version": "0.0.0",
-  "websiteUrl": "https://github.com/wyre-technology/superops-mcp",
+  "websiteUrl": "https://github.com/WYRE-AI/superops-mcp",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/wyre-technology/superops-mcp:0.0.0",
+      "identifier": "ghcr.io/wyre-ai/superops-mcp:0.0.0",
       "transport": {
         "type": "stdio"
       },
