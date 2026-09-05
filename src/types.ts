@@ -40,21 +40,51 @@ export type Json = unknown;
 /**
  * Pagination metadata. SuperOps uses page/pageSize offsets — not Relay cursors,
  * so there is no `hasNextPage`/`endCursor` here.
+ *
+ * `hasMore` is tri-state on the wire: `true` when a further page exists and
+ * `null` — never `false` — when it does not. Verified against a live tenant.
+ * Loop on `hasMore === true`, never on `hasMore === false`, or you never
+ * terminate. `totalCount` is reliable and is the safer basis for paging.
  */
 export interface ListInfo {
   page?: number;
   pageSize?: number;
   totalCount?: number;
-  hasMore?: boolean;
+  hasMore?: boolean | null;
   sort?: SortInput[];
   condition?: Json;
 }
 
-/** A single filter clause. SuperOps accepts exactly one per request. */
+/**
+ * A filter condition — either a single clause, or a compound of clauses joined
+ * by `joinOperator`. The published docs describe only the flat form, but live
+ * introspection and live queries confirm the recursive one:
+ *
+ *   { joinOperator: "OR", operands: [
+ *       { attribute: "name",         operator: "contains", value: "acme" },
+ *       { attribute: "emailDomains", operator: "contains", value: "acme" },
+ *   ]}
+ *
+ * `joinOperator` MUST be uppercase. Anything the API does not recognise —
+ * lowercase "and", or outright junk — is silently ignored and the operands are
+ * joined with OR instead, returning a superset with no error. Verified live:
+ * `"and"` over two clauses returned the OR result, `"AND"` returned the
+ * intersection. Never widen this to accept lowercase.
+ *
+ * Operators verified against a live tenant: `is`, `isNot`, `contains`,
+ * `notContains`, `startsWith`, `endsWith` take a string; `includes` and
+ * `notIncludes` take an array. `equals` and `in` are rejected with a 500.
+ *
+ * Attribute and operator strings are plain `String` in the schema, so a bad
+ * pair is only caught at runtime — and an unknown *value* does not error at
+ * all, it silently returns zero rows.
+ */
 export interface RuleConditionInput {
   attribute?: string;
   operator?: string;
   value?: Json;
+  joinOperator?: "AND" | "OR";
+  operands?: RuleConditionInput[];
 }
 
 export interface SortInput {

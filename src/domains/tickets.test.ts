@@ -133,12 +133,28 @@ describe("Tickets Domain", () => {
       expect(document).not.toContain("endCursor");
     });
 
+    /**
+     * Live behaviour: getTicketList returns an EMPTY `tickets` array — with a
+     * correct, filter-aware totalCount and no error — whenever `ticketId` is
+     * missing from the selection set. Dropping it would silently break every
+     * list call, and schema validation would not notice.
+     */
+    it("selects ticketId, without which the API returns no rows", async () => {
+      mockClient.query.mockResolvedValue(emptyList);
+
+      const domain = getTicketsTools();
+      await domain.handleCall("superops_tickets_list", {});
+
+      const [document] = mockClient.query.mock.calls[0] as [string];
+      expect(document).toMatch(/\bticketId\b/);
+    });
+
     it("applies status as an includes condition", async () => {
       mockClient.query.mockResolvedValue(emptyList);
 
       const domain = getTicketsTools();
       await domain.handleCall("superops_tickets_list", {
-        status: ["Open", "In Progress"],
+        status: ["Open", "On Hold"],
       });
 
       expect(mockClient.query).toHaveBeenCalledWith(
@@ -148,7 +164,7 @@ describe("Tickets Domain", () => {
             condition: {
               attribute: "status",
               operator: "includes",
-              value: ["Open", "In Progress"],
+              value: ["Open", "On Hold"],
             },
           }),
         })
@@ -217,7 +233,11 @@ describe("Tickets Domain", () => {
       );
     });
 
-    it("sends only one condition when several filters are supplied", async () => {
+    /**
+     * RuleConditionInput is recursive, so every filter is applied rather than
+     * one winning by precedence and the rest being silently discarded.
+     */
+    it("combines every supplied filter under a single AND", async () => {
       mockClient.query.mockResolvedValue(emptyList);
 
       const domain = getTicketsTools();
@@ -233,10 +253,76 @@ describe("Tickets Domain", () => {
         { input: { condition?: unknown } },
       ];
       expect(variables.input.condition).toEqual({
+        joinOperator: "AND",
+        operands: [
+          { attribute: "status", operator: "includes", value: ["Open"] },
+          { attribute: "priority", operator: "includes", value: ["High"] },
+          { attribute: "client", operator: "includes", value: ["client-123"] },
+          { attribute: "technician", operator: "includes", value: ["tech-456"] },
+        ],
+      });
+    });
+
+    it("combines exactly two filters under an AND", async () => {
+      mockClient.query.mockResolvedValue(emptyList);
+
+      const domain = getTicketsTools();
+      await domain.handleCall("superops_tickets_list", {
+        status: ["Open", "On Hold"],
+        clientId: "client-123",
+      });
+
+      const [, variables] = mockClient.query.mock.calls[0] as [
+        string,
+        { input: { condition?: unknown } },
+      ];
+      expect(variables.input.condition).toEqual({
+        joinOperator: "AND",
+        operands: [
+          { attribute: "status", operator: "includes", value: ["Open", "On Hold"] },
+          { attribute: "client", operator: "includes", value: ["client-123"] },
+        ],
+      });
+    });
+
+    /**
+     * An unrecognised joinOperator — including lowercase "and" — is silently
+     * treated as OR by the API, returning a superset with no error. Pin the
+     * exact casing.
+     */
+    it("emits an uppercase joinOperator, which lowercase would silently turn into OR", async () => {
+      mockClient.query.mockResolvedValue(emptyList);
+
+      const domain = getTicketsTools();
+      await domain.handleCall("superops_tickets_list", {
+        status: ["Open"],
+        priority: ["High"],
+      });
+
+      const [, variables] = mockClient.query.mock.calls[0] as [
+        string,
+        { input: { condition?: { joinOperator?: string } } },
+      ];
+      expect(variables.input.condition?.joinOperator).toBe("AND");
+    });
+
+    it("sends a bare leaf condition, not a join, for a single filter", async () => {
+      mockClient.query.mockResolvedValue(emptyList);
+
+      const domain = getTicketsTools();
+      await domain.handleCall("superops_tickets_list", { status: ["Open"] });
+
+      const [, variables] = mockClient.query.mock.calls[0] as [
+        string,
+        { input: { condition?: Record<string, unknown> } },
+      ];
+      expect(variables.input.condition).toEqual({
         attribute: "status",
         operator: "includes",
         value: ["Open"],
       });
+      expect(variables.input.condition).not.toHaveProperty("joinOperator");
+      expect(variables.input.condition).not.toHaveProperty("operands");
     });
 
     it("clamps pageSize to the documented maximum", async () => {
@@ -374,6 +460,30 @@ describe("Tickets Domain", () => {
       expect(tool?.inputSchema.properties).toHaveProperty("technicianId");
       expect(tool?.inputSchema.required).toContain("subject");
       expect(tool?.inputSchema.required).toContain("clientId");
+    });
+
+    /**
+     * The advertised enum must match the live TicketSource enum exactly. It
+     * previously stopped at INTEGRATION, which made the last four values
+     * unreachable through this tool even though the API accepts them.
+     */
+    it("advertises every TicketSource value the API accepts", () => {
+      const domain = getTicketsTools();
+      const tool = domain.tools.find((t) => t.name === "superops_tickets_create");
+      const source = tool?.inputSchema.properties?.source as { enum?: string[] };
+
+      expect(source.enum).toEqual([
+        "FORM",
+        "AGENT",
+        "EMAIL",
+        "AI",
+        "PHONE",
+        "INTEGRATION",
+        "SCHEDULE",
+        "CONTRACT_REMINDER",
+        "CONTRACT",
+        "INSTANT_MESSAGING",
+      ]);
     });
 
     it("calls mutate with required fields and a default source", async () => {
@@ -553,7 +663,7 @@ describe("Tickets Domain", () => {
 
     it("adds a PRIVATE note by default", async () => {
       mockClient.mutate.mockResolvedValue({
-        createTicketNote: {
+        createNote: {
           noteId: "note-123",
           content: "Test note",
           addedOn: "2026-01-01T00:00:00Z",
@@ -568,10 +678,10 @@ describe("Tickets Domain", () => {
       });
 
       expect(mockClient.mutate).toHaveBeenCalledWith(
-        expect.stringContaining("createTicketNote"),
+        expect.stringContaining("createNote"),
         expect.objectContaining({
           input: {
-            ticket: { ticketId: "ticket-123" },
+            workItem: { workId: "ticket-123", module: "TICKET" },
             content: "Test note",
             privacyType: "PRIVATE",
           },
@@ -580,9 +690,29 @@ describe("Tickets Domain", () => {
       expect(result.content[0].text).toContain("note-123");
     });
 
+    /**
+     * The Mutation type has no `createTicketNote` field on the live API, even
+     * though the schema still declares one. Sending it fails at the API, so
+     * pin the mutation this tool actually issues.
+     */
+    it("uses createNote, not the non-existent createTicketNote", async () => {
+      mockClient.mutate.mockResolvedValue({ createNote: { noteId: "note-123" } });
+
+      const domain = getTicketsTools();
+      await domain.handleCall("superops_tickets_add_note", {
+        ticketId: "ticket-123",
+        content: "Test note",
+      });
+
+      const [document] = mockClient.mutate.mock.calls[0] as [string];
+      expect(document).not.toContain("createTicketNote");
+      expect(document).not.toContain("CreateTicketNoteInput");
+      expect(document).toContain("CreateNoteInput!");
+    });
+
     it("maps isPublic to the PUBLIC privacy type", async () => {
       mockClient.mutate.mockResolvedValue({
-        createTicketNote: { noteId: "note-123", privacyType: "PUBLIC" },
+        createNote: { noteId: "note-123", privacyType: "PUBLIC" },
       });
 
       const domain = getTicketsTools();

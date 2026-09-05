@@ -9,6 +9,14 @@
  * API. `category` is a plain `String`, not an object, and there is no
  * `description` field on `Ticket`: description is write-only on
  * `CreateTicketInput` and is read back through the ticket conversation.
+ *
+ * `getTicketList` only returns rows when `ticketId` is part of the `tickets`
+ * selection set. Omit it and the API answers with an empty `tickets` array
+ * alongside a correct, filter-aware `listInfo.totalCount` — no error, just
+ * silently no data. Keep `ticketId` in LIST_TICKETS_QUERY.
+ *
+ * `listInfo.hasMore` is `true` when further pages exist and `null` — never
+ * `false` — when they do not.
  */
 
 import { getClient } from "../client.js";
@@ -126,9 +134,18 @@ const UPDATE_TICKET_MUTATION = `
   }
 `;
 
-const CREATE_TICKET_NOTE_MUTATION = `
-  mutation createTicketNote($input: CreateTicketNoteInput!) {
-    createTicketNote(input: $input) {
+/**
+ * Notes are created through `createNote`, NOT `createTicketNote`. The schema
+ * still declares a `createTicketNote(input: CreateTicketNoteInput!)` field and
+ * the `CreateTicketNoteInput` type, so offline validation accepts both — but
+ * live introspection of the Mutation type lists only `createNote`, and calling
+ * `createTicketNote` fails at the API. `createNote` addresses its target the
+ * same way worklog entries do, through `workItem { workId module }`, rather
+ * than through a ticket-specific `ticket { ticketId }`.
+ */
+const CREATE_NOTE_MUTATION = `
+  mutation createNote($input: CreateNoteInput!) {
+    createNote(input: $input) {
       noteId
       content
       addedOn
@@ -180,8 +197,8 @@ interface UpdateTicketResponse {
   updateTicket: Ticket;
 }
 
-interface CreateTicketNoteResponse {
-  createTicketNote: Note;
+interface CreateNoteResponse {
+  createNote: Note;
 }
 
 interface CreateWorklogEntriesResponse {
@@ -189,14 +206,70 @@ interface CreateWorklogEntriesResponse {
 }
 
 /**
- * SuperOps accepts exactly ONE condition clause per request, and validates the
- * `attribute`/`operator` strings at runtime — the schema types them as plain
- * `String`, so a bad pair fails at the API, not at query validation. Only
- * `includes` (array value), `contains` and `startsWith` (string value) are
- * documented. A tenant needing anything else should use `superops_custom_query`.
+ * Status, priority, impact, urgency, category and resolution code are all
+ * per-tenant lookup lists, not GraphQL enums — every one of them is typed as a
+ * plain `String` on the ticket inputs. The values below are what SuperOps ships
+ * with out of the box, confirmed against a live tenant.
+ *
+ * They are documented in descriptions rather than pinned as JSON Schema `enum`
+ * constraints on purpose: a tenant can rename or extend any of these lists, and
+ * an `enum` would then reject values the API accepts — silently, as an empty
+ * result rather than an error.
+ *
+ * To read a tenant's authoritative lists, run this through
+ * `superops_custom_query`. It returns every option list for the module in one
+ * call, with `parentField` linking subcategory to category and subcause to
+ * cause:
+ *
+ *     query { getAllFields(input: "TICKET") {
+ *       columnName options { value } parentField { columnName }
+ *     } }
+ */
+const STOCK_STATUSES = "Open, On Hold, Resolved, Closed, Waiting on third party";
+const STOCK_PRIORITIES = "Critical, High, Medium, Low, Very Low";
+const STOCK_SEVERITIES = "High, Medium, Low";
+const STOCK_RESOLUTION_CODES =
+  "Permanent Fix, Workaround, Resolved by Requester, Exception";
+const STOCK_CATEGORIES = "Database, Hardware, Help, Network, Software";
+
+/** Appended to any description naming a stock list, to flag it as per-tenant. */
+const TENANT_CAVEAT = "Your tenant may rename or extend this list.";
+
+/**
+ * SuperOps validates the `attribute`/`operator` strings at runtime — the schema
+ * types them as plain `String`, so a bad pair fails at the API, not at query
+ * validation. Confirmed live: `is`, `isNot`, `contains`, `notContains`,
+ * `startsWith` and `endsWith` take a string value; `includes` and `notIncludes`
+ * take an array. `equals` and `in` are rejected with a 500.
+ *
+ * The four attributes this domain filters on — `status`, `priority`, `client`
+ * and `technician` — are all confirmed live against `getTicketList` with
+ * `includes` and an array value. They are flat attribute names: the nested
+ * forms (`client.accountId`, `technician.userId`) are NOT what the API wants,
+ * even though the ticket reads those objects back with those keys.
+ *
+ * Filtering on a value outside the tenant's configured set is NOT an error —
+ * it returns `totalCount: 0`. A wrong value looks like "no results", so the
+ * tool descriptions name the real value sets rather than guessing.
  */
 function condition(attribute: string, operator: string, value: unknown): RuleConditionInput {
   return { attribute, operator, value };
+}
+
+/**
+ * `RuleConditionInput` is recursive: a clause is either a leaf
+ * (attribute/operator/value) or a join (`joinOperator` + `operands`), so
+ * several filters can be combined in one request.
+ *
+ * `joinOperator` is CASE-SENSITIVE, and getting it wrong fails silently.
+ * Verified live: `"AND"` intersects, but lowercase `"and"` is not recognized
+ * and falls back to a union — it returns a superset with no error. Always
+ * emit uppercase.
+ */
+function all(clauses: RuleConditionInput[]): RuleConditionInput | undefined {
+  if (clauses.length === 0) return undefined;
+  if (clauses.length === 1) return clauses[0];
+  return { joinOperator: "AND", operands: clauses };
 }
 
 export function getTicketsTools(): DomainTools {
@@ -206,8 +279,9 @@ export function getTicketsTools(): DomainTools {
         name: "superops_tickets_list",
         description:
           "List tickets in SuperOps.ai. Results are paginated with page/pageSize. " +
-          "SuperOps accepts only one filter per request, so the first of " +
-          "status, priority, clientId, technicianId that is supplied wins.",
+          "All supplied filters are combined: a ticket must match every one of " +
+          "status, priority, clientId and technicianId that you provide, and " +
+          "within status and priority it may match any of the listed values.",
         inputSchema: {
           type: "object",
           properties: {
@@ -215,23 +289,23 @@ export function getTicketsTools(): DomainTools {
               type: "array",
               items: { type: "string" },
               description:
-                "Filter by status(es), e.g. Open, In Progress, Pending, Resolved, Closed. " +
-                "Values must match the statuses configured in your SuperOps tenant.",
+                `Filter by status(es). SuperOps ships with: ${STOCK_STATUSES}. ` +
+                `${TENANT_CAVEAT} Values must match it exactly.`,
             },
             priority: {
               type: "array",
               items: { type: "string" },
               description:
-                "Filter by priority(ies), e.g. Low, Medium, High, Critical (ignored if status is also given)",
+                `Filter by priority(ies). SuperOps ships with: ${STOCK_PRIORITIES}. ` +
+                `${TENANT_CAVEAT}`,
             },
             clientId: {
               type: "string",
-              description: "Filter by client account ID (ignored if status or priority is given)",
+              description: "Filter by client account ID",
             },
             technicianId: {
               type: "string",
-              description:
-                "Filter by assigned technician user ID (ignored if an earlier filter is given)",
+              description: "Filter by assigned technician user ID",
             },
             page: {
               type: "number",
@@ -284,32 +358,49 @@ export function getTicketsTools(): DomainTools {
             source: {
               type: "string",
               description: "How the ticket originated (default: INTEGRATION)",
-              enum: ["FORM", "AGENT", "EMAIL", "AI", "PHONE", "INTEGRATION"],
+              // The full TicketSource enum as the live API declares it. The
+              // previous list stopped at INTEGRATION and rejected the last
+              // four, which are valid.
+              enum: [
+                "FORM",
+                "AGENT",
+                "EMAIL",
+                "AI",
+                "PHONE",
+                "INTEGRATION",
+                "SCHEDULE",
+                "CONTRACT_REMINDER",
+                "CONTRACT",
+                "INSTANT_MESSAGING",
+              ],
               default: "INTEGRATION",
             },
             status: {
               type: "string",
-              description: "Initial status, e.g. Open (defaults to the tenant's default status)",
+              description:
+                `Initial status; defaults to the tenant's default status. ` +
+                `SuperOps ships with: ${STOCK_STATUSES}. ${TENANT_CAVEAT}`,
             },
             priority: {
               type: "string",
-              description: "Ticket priority, e.g. Low, Medium, High, Critical",
+              description: `Ticket priority. SuperOps ships with: ${STOCK_PRIORITIES}. ${TENANT_CAVEAT}`,
             },
             impact: {
               type: "string",
-              description: "Ticket impact, e.g. Low, Medium, High",
+              description: `Ticket impact. SuperOps ships with: ${STOCK_SEVERITIES}. ${TENANT_CAVEAT}`,
             },
             urgency: {
               type: "string",
-              description: "Ticket urgency, e.g. Low, Medium, High",
+              description: `Ticket urgency. SuperOps ships with: ${STOCK_SEVERITIES}. ${TENANT_CAVEAT}`,
             },
             category: {
               type: "string",
-              description: "Service category name",
+              description: `Service category name. SuperOps ships with: ${STOCK_CATEGORIES}. ${TENANT_CAVEAT}`,
             },
             subcategory: {
               type: "string",
-              description: "Service subcategory name",
+              description:
+                "Service subcategory name; must be one of the subcategories defined under the chosen category.",
             },
             requestType: {
               type: "string",
@@ -354,27 +445,28 @@ export function getTicketsTools(): DomainTools {
             },
             status: {
               type: "string",
-              description: "New status, e.g. Open, In Progress, Pending, Resolved, Closed",
+              description: `New status. SuperOps ships with: ${STOCK_STATUSES}. ${TENANT_CAVEAT}`,
             },
             priority: {
               type: "string",
-              description: "New priority, e.g. Low, Medium, High, Critical",
+              description: `New priority. SuperOps ships with: ${STOCK_PRIORITIES}. ${TENANT_CAVEAT}`,
             },
             impact: {
               type: "string",
-              description: "New impact, e.g. Low, Medium, High",
+              description: `New impact. SuperOps ships with: ${STOCK_SEVERITIES}. ${TENANT_CAVEAT}`,
             },
             urgency: {
               type: "string",
-              description: "New urgency, e.g. Low, Medium, High",
+              description: `New urgency. SuperOps ships with: ${STOCK_SEVERITIES}. ${TENANT_CAVEAT}`,
             },
             category: {
               type: "string",
-              description: "New service category name",
+              description: `New service category name. SuperOps ships with: ${STOCK_CATEGORIES}. ${TENANT_CAVEAT}`,
             },
             subcategory: {
               type: "string",
-              description: "New service subcategory name",
+              description:
+                "New service subcategory name; must be one of the subcategories defined under the chosen category.",
             },
             requestType: {
               type: "string",
@@ -382,7 +474,9 @@ export function getTicketsTools(): DomainTools {
             },
             resolutionCode: {
               type: "string",
-              description: "Resolution code configured in SuperOps (for resolving/closing tickets)",
+              description:
+                `Resolution code, for resolving/closing tickets. SuperOps ships with: ` +
+                `${STOCK_RESOLUTION_CODES}. ${TENANT_CAVEAT}`,
             },
             technicianId: {
               type: "string",
@@ -502,7 +596,7 @@ export function getTicketsTools(): DomainTools {
               const statusChoice = await elicitText(
                 "No filters specified. Would you like to narrow by ticket status?",
                 "status",
-                "Enter status (Open, In Progress, Pending, Resolved, Closed) or leave blank for all"
+                `Enter status (${STOCK_STATUSES}) or leave blank for all`
               );
               if (statusChoice) {
                 params.status = statusChoice
@@ -512,20 +606,29 @@ export function getTicketsTools(): DomainTools {
               }
             }
 
+            // Every supplied filter is applied. Within one filter the values
+            // are OR'd by `includes`; the filters are then AND'd together.
+            const clauses: RuleConditionInput[] = [];
+            if (params.status?.length) {
+              clauses.push(condition("status", "includes", params.status));
+            }
+            if (params.priority?.length) {
+              clauses.push(condition("priority", "includes", params.priority));
+            }
+            if (params.clientId) {
+              clauses.push(condition("client", "includes", [params.clientId]));
+            }
+            if (params.technicianId) {
+              clauses.push(condition("technician", "includes", [params.technicianId]));
+            }
+
             const input: ListInfoInput = {
               page: pageOf(params.page),
               pageSize: pageSizeOf(params.pageSize),
               sort: [{ attribute: "createdTime", order: "DESC" }],
             };
-            if (params.status?.length) {
-              input.condition = condition("status", "includes", params.status);
-            } else if (params.priority?.length) {
-              input.condition = condition("priority", "includes", params.priority);
-            } else if (params.clientId) {
-              input.condition = condition("client", "includes", [params.clientId]);
-            } else if (params.technicianId) {
-              input.condition = condition("technician", "includes", [params.technicianId]);
-            }
+            const filter = all(clauses);
+            if (filter) input.condition = filter;
 
             const response = await client.query<ListTicketsResponse>(LIST_TICKETS_QUERY, {
               input,
@@ -671,22 +774,19 @@ export function getTicketsTools(): DomainTools {
 
             // Default to PRIVATE: an internal note can be made public later,
             // but a note sent to the client cannot be unsent.
-            const response = await client.mutate<CreateTicketNoteResponse>(
-              CREATE_TICKET_NOTE_MUTATION,
-              {
-                input: {
-                  ticket: { ticketId: params.ticketId },
-                  content: params.content,
-                  privacyType: params.isPublic ? "PUBLIC" : "PRIVATE",
-                },
-              }
-            );
+            const response = await client.mutate<CreateNoteResponse>(CREATE_NOTE_MUTATION, {
+              input: {
+                workItem: { workId: params.ticketId, module: "TICKET" },
+                content: params.content,
+                privacyType: params.isPublic ? "PUBLIC" : "PRIVATE",
+              },
+            });
 
             return {
               content: [
                 {
                   type: "text",
-                  text: JSON.stringify(response.createTicketNote, null, 2),
+                  text: JSON.stringify(response.createNote, null, 2),
                 },
               ],
             };

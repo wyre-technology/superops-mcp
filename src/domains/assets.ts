@@ -4,13 +4,37 @@
  * Tools for managing assets (endpoints) in SuperOps.ai RMM.
  *
  * Every document here is validated against schema/superops.graphql by
- * graphql-schema.test.ts. Two SuperOps traits shape the queries below:
+ * graphql-schema.test.ts. Several SuperOps traits shape the queries below:
  *
  *  - `client`, `site`, `requester`, `assetClass`, `deviceCategory`,
  *    `customFields` and `software` are the `JSON` scalar. They are selected
  *    bare; a subselection makes the API reject the whole request.
  *  - Pagination is page/pageSize offsets, not Relay cursors. There is no
  *    `first`/`after`/`hasNextPage`/`endCursor`.
+ *  - `listInfo.hasMore` is tri-state in practice: `true` when a further page
+ *    exists and `null` — never `false` — when one does not. This holds for the
+ *    asset list and the nested software/patch lists alike, so treat a nullish
+ *    `hasMore` as "no more", or page off `totalCount` instead.
+ *  - Every value-bearing asset field (`status`, `platform`, `severity`,
+ *    `installationStatus`) is `String` in the schema, not an enum, and the
+ *    field-metadata API that serves authoritative option lists for other
+ *    modules does not cover assets: `getAllFields("ASSET")` errors where
+ *    `getAllFields("CLIENT")` and `("TICKET")` return real option sets. These
+ *    values are agent telemetry, not admin-configured picklists, so no tool
+ *    below advertises an `enum` — and a wrong one would fail *silently*, since
+ *    an out-of-range value returns zero rows rather than an error.
+ *
+ * Filter semantics, established against a live tenant:
+ *
+ *  - Array-valued operators: `includes`, `notIncludes`.
+ *  - Scalar-valued operators: `is`, `isNot`, `contains`, `notContains`,
+ *    `startsWith`, `endsWith`. All matching is case-insensitive.
+ *  - `equals` and `in` are rejected outright, as is any unknown attribute or
+ *    operator.
+ *  - Conditions compose: `RuleConditionInput` is recursive via `joinOperator`
+ *    and `operands`. See `combineConditions` for the uppercase-`"AND"` trap.
+ *  - Filtering a JSON-scalar column by its bare name silently matches nothing;
+ *    the nested path is required (`software.name`, not `software`).
  */
 
 import { getClient } from "../client.js";
@@ -159,33 +183,44 @@ interface GetPatchesResponse {
   };
 }
 
-/** One `RuleConditionInput` clause — SuperOps accepts at most one per request. */
-interface Condition {
+/** A leaf `RuleConditionInput` clause. */
+interface Clause {
   attribute: string;
   operator: string;
   value: unknown;
 }
 
+/** A compound `RuleConditionInput` joining leaf clauses. */
+interface CompoundCondition {
+  joinOperator: "AND" | "OR";
+  operands: Clause[];
+}
+
+type Condition = Clause | CompoundCondition;
+
 /**
- * Reduce the candidate filters to the single clause SuperOps allows.
+ * Join the supplied filters into one `RuleConditionInput`.
  *
- * `RuleConditionInput` has no AND/OR composition, so two filters cannot be
- * combined — asking for both is an error rather than a silently dropped one.
- * Note that `attribute` and `operator` strings are validated by SuperOps at
- * runtime, not by the GraphQL schema: an unsupported attribute comes back as
- * an API error, not a schema error. `superops_custom_query` is the escape
- * hatch for anything this cannot express.
+ * `RuleConditionInput` is recursive — `joinOperator` plus `operands` — so
+ * several filters do combine, contrary to the published docs. A lone clause is
+ * sent bare rather than wrapped in a one-operand compound.
+ *
+ * The join token is deliberately uppercase. Verified live: `"AND"` intersects,
+ * but lowercase `"and"` is silently treated as OR — it *widens* the result set
+ * instead of erroring, so a filtered call quietly returns rows that match only
+ * one of the filters. `"OR"` and `"or"` both mean OR, so only AND is exposed to
+ * this trap.
+ *
+ * `attribute` and `operator` are validated by SuperOps at runtime, not by the
+ * GraphQL schema: an unsupported one is an API error, while a *valid* attribute
+ * filtered on an out-of-range value returns zero rows with no error at all.
+ * `superops_custom_query` is the escape hatch for anything this cannot express.
  */
-function singleCondition(candidates: (Condition | undefined)[]): Condition | undefined {
-  const clauses = candidates.filter((c): c is Condition => c !== undefined);
-  if (clauses.length > 1) {
-    throw new Error(
-      `SuperOps accepts only one filter condition per request, but ${clauses.length} were given ` +
-        `(${clauses.map((c) => c.attribute).join(", ")}). Apply one filter, or use ` +
-        `superops_custom_query for a compound query.`
-    );
-  }
-  return clauses[0];
+function combineConditions(candidates: (Clause | undefined)[]): Condition | undefined {
+  const clauses = candidates.filter((c): c is Clause => c !== undefined);
+  if (clauses.length === 0) return undefined;
+  if (clauses.length === 1) return clauses[0];
+  return { joinOperator: "AND", operands: clauses };
 }
 
 export function getAssetsTools(): DomainTools {
@@ -194,26 +229,32 @@ export function getAssetsTools(): DomainTools {
       {
         name: "superops_assets_list",
         description:
-          "List assets (endpoints) in SuperOps.ai RMM. SuperOps applies a single filter " +
-          "condition per request, so supply at most one of status, platform or clientId.",
+          "List assets (endpoints) in SuperOps.ai RMM. Supply any combination of status, " +
+          "platform and clientId; several filters are combined with AND. " +
+          "listInfo.hasMore is true when a further page exists and null (never false) when " +
+          "it does not, so treat null as the end or page against totalCount.",
         inputSchema: {
           type: "object",
           properties: {
             status: {
               type: "string",
               description:
-                'Filter by asset status exactly as SuperOps reports it, e.g. "Online" or ' +
-                '"Offline". Values are validated by SuperOps, not by this server.',
+                "Filter by asset status, matched whole and case-insensitively. Observed " +
+                'values are "ONLINE" and "OFFLINE"; SuperOps validates the value at ' +
+                "runtime, so a status this tenant uses but the list omits still works.",
             },
             platform: {
               type: "string",
               description:
-                'Filter by platform exactly as SuperOps reports it, e.g. "Windows", "Linux" ' +
-                'or "Mac".',
+                "Substring of the platform string, matched case-insensitively. SuperOps " +
+                'stores a full OS name ("Microsoft Windows 10 Pro", "darwin"), so pass a ' +
+                'fragment such as "Windows" or "darwin" rather than a whole name.',
             },
             clientId: {
               type: "string",
-              description: "Filter by client account ID",
+              description:
+                "Filter by client account ID — the `accountId` inside an asset's `client` " +
+                "object, as returned by superops_clients_list.",
             },
             ...PAGE_PROPERTIES,
           },
@@ -252,7 +293,9 @@ export function getAssetsTools(): DomainTools {
             },
             search: {
               type: "string",
-              description: "Substring match on the software name",
+              description:
+                "Substring of the software name, matched case-insensitively. Matches the " +
+                "name only, not the manufacturer.",
             },
             ...PAGE_PROPERTIES,
           },
@@ -262,8 +305,10 @@ export function getAssetsTools(): DomainTools {
       {
         name: "superops_assets_patches",
         description:
-          "Get patch status and patch details for a specific asset. SuperOps applies a single " +
-          "filter condition per request, so supply at most one of installationStatus or severity.",
+          "Get patch status and patch details for a specific asset: title, KB numbers, " +
+          "category, severity, approval status and installation status. installationStatus and " +
+          "severity may be combined; they are joined with AND. For a one-word roll-up of the asset's overall patch health instead of " +
+          "the per-patch list, use superops_custom_query with getAssetPatchStatus.",
         inputSchema: {
           type: "object",
           properties: {
@@ -274,15 +319,17 @@ export function getAssetsTools(): DomainTools {
             installationStatus: {
               type: "string",
               description:
-                'Filter by installation status as SuperOps reports it, e.g. "Installed", ' +
-                '"Pending" or "Failed".',
+                "Filter by patch installation status, matched whole and case-insensitively. " +
+                'Observed values are "Installed" and "NewOrMissing" — note this is the ' +
+                "install state, not the separate `approvalStatus` (Approved/Pending).",
             },
             severity: {
               type: "array",
               items: { type: "string" },
               description:
-                'Filter by one or more severity levels, e.g. "Critical", "Important", ' +
-                '"Moderate", "Low".',
+                "Filter by one or more patch severities, each matched whole and " +
+                'case-insensitively. Observed values are "Others" and "Recommended"; ' +
+                "SuperOps validates them at runtime, so other severities may exist.",
             },
             ...PAGE_PROPERTIES,
           },
@@ -305,12 +352,14 @@ export function getAssetsTools(): DomainTools {
               pageSize?: number;
             };
 
-            const condition = singleCondition([
+            const condition = combineConditions([
               params.status
                 ? { attribute: "status", operator: "includes", value: [params.status] }
                 : undefined,
+              // `includes` would demand the whole OS string ("Microsoft Windows 10 Pro"),
+              // which no caller can guess; `contains` matches the fragment they do know.
               params.platform
-                ? { attribute: "platform", operator: "includes", value: [params.platform] }
+                ? { attribute: "platform", operator: "contains", value: params.platform }
                 : undefined,
               params.clientId
                 ? { attribute: "client", operator: "includes", value: [params.clientId] }
@@ -360,9 +409,11 @@ export function getAssetsTools(): DomainTools {
               pageSize?: number;
             };
 
-            const condition = singleCondition([
+            const condition = combineConditions([
+              // `software` is a JSON object; filtering on the bare column matches
+              // nothing at all rather than erroring, so the name path is required.
               params.search
-                ? { attribute: "software", operator: "contains", value: params.search }
+                ? { attribute: "software.name", operator: "contains", value: params.search }
                 : undefined,
             ]);
 
@@ -395,7 +446,7 @@ export function getAssetsTools(): DomainTools {
               pageSize?: number;
             };
 
-            const condition = singleCondition([
+            const condition = combineConditions([
               params.installationStatus
                 ? {
                     attribute: "installationStatus",

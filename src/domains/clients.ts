@@ -7,6 +7,21 @@
  * `secondaryContact`, `hqSite`, `technicianGroups` and `customFields` through
  * the `JSON` scalar. They must be selected bare — a subselection on a scalar is
  * rejected outright by the API.
+ *
+ * `stage` and `status` are plain `String` in the schema, not enums. Their
+ * allowed values are tenant configuration, published by
+ * `getAllFields(input: "CLIENT")`. `status` is a *child* of `stage`, so each
+ * status value belongs to one stage:
+ *
+ *   Active   → Paid, Unpaid
+ *   Prospect → New, Negotiation, Won, Lost
+ *   Inactive → (no status options)
+ *
+ * Filtering on an unrecognised value is not an error — it silently matches
+ * nothing — so the enums advertised below must stay in step with that list.
+ *
+ * `listInfo.hasMore` is `true` when further pages exist and `null` on the last
+ * page. SuperOps never returns `false`, so treat any falsy value as "no more".
  */
 
 import { getClient } from "../client.js";
@@ -93,14 +108,53 @@ interface GetClientResponse {
 }
 
 /**
- * SuperOps accepts exactly ONE condition clause per request, and validates the
- * `attribute`/`operator` strings at runtime — the schema types them as plain
- * `String`, so a bad pair fails at the API, not at query validation. Only
- * `includes` (array value), `contains` and `startsWith` (string value) are
- * documented. A tenant needing anything else should use `superops_custom_query`.
+ * `RuleConditionInput` is recursive: a clause is either a leaf
+ * (`attribute`/`operator`/`value`) or a branch (`joinOperator` + `operands`).
+ * Branches nest, so filters are not limited to one clause.
+ *
+ * Operators verified against the live `getClientList`:
+ *   array value  — `includes`, `notIncludes`
+ *   string value — `is`, `isNot`, `contains`, `notContains`, `startsWith`,
+ *                  `endsWith`
+ * `equals` and `in` are rejected with a 500. The set is attribute-agnostic:
+ * every accepted operator works on both `name` and `stage`.
+ *
+ * `joinOperator` is CASE-SENSITIVE and must be `"AND"` / `"OR"`. Anything the
+ * API does not recognise — lowercase `"and"` included — silently falls back to
+ * OR rather than erroring, so a lowercase `"and"` returns a *union* and looks
+ * like a working filter that quietly over-matches. Verified live: uppercase
+ * `"AND"` on stage=Active + status=New returns 0 rows (correct — no Active
+ * client can hold a Prospect status), while lowercase `"and"` returns all 3.
+ *
+ * A tenant needing anything else should use `superops_custom_query`.
  */
 function condition(attribute: string, operator: string, value: unknown): RuleConditionInput {
   return { attribute, operator, value };
+}
+
+/**
+ * Combine leaf clauses under one join. A single clause is returned bare — the
+ * API treats a lone operand the same either way, and an unwrapped clause keeps
+ * the request readable.
+ */
+function join(
+  joinOperator: "AND" | "OR",
+  clauses: RuleConditionInput[]
+): RuleConditionInput | undefined {
+  if (clauses.length === 0) return undefined;
+  if (clauses.length === 1) return clauses[0];
+  return { joinOperator, operands: clauses };
+}
+
+/** Match a search term against the client name or any of its email domains. */
+function nameOrEmailDomain(query: string): RuleConditionInput {
+  return {
+    joinOperator: "OR",
+    operands: [
+      condition("name", "contains", query),
+      condition("emailDomains", "contains", query),
+    ],
+  };
 }
 
 export function getClientsTools(): DomainTools {
@@ -110,21 +164,25 @@ export function getClientsTools(): DomainTools {
         name: "superops_clients_list",
         description:
           "List clients (accounts) in SuperOps.ai. Results are paginated with page/pageSize. " +
-          "SuperOps accepts only one filter per request, so status takes precedence over stage " +
-          "when both are supplied.",
+          "Supplying both stage and status narrows to clients matching both.",
         inputSchema: {
           type: "object",
           properties: {
             status: {
               type: "string",
-              description: "Filter by status: Active, Inactive, or Archived",
-              enum: ["Active", "Inactive", "Archived"],
+              description:
+                "Filter by status. Status is a sub-state of stage: Paid and Unpaid belong to " +
+                "stage Active; New, Negotiation, Won and Lost belong to stage Prospect. " +
+                "Stage Inactive has no statuses. Pairing a status with a stage it does not " +
+                "belong to matches nothing.",
+              enum: ["Paid", "Unpaid", "New", "Negotiation", "Won", "Lost"],
             },
             stage: {
               type: "string",
               description:
-                "Filter by stage: Lead, Prospect, Customer, or Churned (ignored if status is also given)",
-              enum: ["Lead", "Prospect", "Customer", "Churned"],
+                "Filter by stage: Active, Inactive, or Prospect. Combined with status if both " +
+                "are given.",
+              enum: ["Active", "Inactive", "Prospect"],
             },
             page: {
               type: "number",
@@ -156,14 +214,14 @@ export function getClientsTools(): DomainTools {
       {
         name: "superops_clients_search",
         description:
-          "Search for clients by name. SuperOps accepts a single filter clause per request, " +
-          "so this matches the client name only — it cannot also search email domains.",
+          "Search for clients by name or email domain. A client matches if the term appears " +
+          "in either, so searching a domain fragment finds the account that owns it.",
         inputSchema: {
           type: "object",
           properties: {
             query: {
               type: "string",
-              description: "Substring to match against the client name",
+              description: "Substring to match against the client name or any of its email domains",
             },
             page: {
               type: "number",
@@ -210,7 +268,7 @@ export function getClientsTools(): DomainTools {
                 const searchInput: ListInfoInput = {
                   page,
                   pageSize,
-                  condition: condition("name", "contains", searchTerm),
+                  condition: nameOrEmailDomain(searchTerm),
                   sort: [{ attribute: "name", order: "ASC" }],
                 };
                 const searchResponse = await client.query<ListClientsResponse>(
@@ -233,10 +291,16 @@ export function getClientsTools(): DomainTools {
               pageSize,
               sort: [{ attribute: "name", order: "ASC" }],
             };
+            const clauses: RuleConditionInput[] = [];
+            if (params.stage) {
+              clauses.push(condition("stage", "includes", [params.stage]));
+            }
             if (params.status) {
-              input.condition = condition("status", "includes", [params.status]);
-            } else if (params.stage) {
-              input.condition = condition("stage", "includes", [params.stage]);
+              clauses.push(condition("status", "includes", [params.status]));
+            }
+            const filter = join("AND", clauses);
+            if (filter) {
+              input.condition = filter;
             }
 
             const response = await client.query<ListClientsResponse>(LIST_CLIENTS_QUERY, {
@@ -276,7 +340,7 @@ export function getClientsTools(): DomainTools {
             const input: ListInfoInput = {
               page: pageOf(params.page),
               pageSize: pageSizeOf(params.pageSize),
-              condition: condition("name", "contains", params.query),
+              condition: nameOrEmailDomain(params.query),
               sort: [{ attribute: "name", order: "ASC" }],
             };
 

@@ -26,10 +26,18 @@ import { registerResourceHandlers } from "./resources.js";
  * It deliberately does NOT reuse superops_clients_list: that tool elicits a
  * search term when called without filters, and a connectivity check must never
  * prompt the user. One client, one field.
+ *
+ * `clients` must be selected even though only the count is reported: asking for
+ * `listInfo` alone is valid GraphQL but makes SuperOps answer 500 Internal
+ * Server Error. Verified against a live tenant — schema validation cannot catch
+ * this, so do not "simplify" the selection set.
  */
 const PING_QUERY = `
   query getClientList($input: ListInfoInput!) {
     getClientList(input: $input) {
+      clients {
+        accountId
+      }
       listInfo {
         totalCount
       }
@@ -251,7 +259,10 @@ export function createMcpServer(): Server {
 
       try {
         const response = await getClient().query<{
-          getClientList?: { listInfo?: { totalCount?: number } };
+          getClientList?: {
+            clients?: { accountId?: string }[];
+            listInfo?: { totalCount?: number };
+          };
         }>(PING_QUERY, { input: { page: 1, pageSize: 1 } });
 
         const totalCount = response.getClientList?.listInfo?.totalCount;

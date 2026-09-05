@@ -4,8 +4,9 @@
  * Tests for client (account) management tools.
  *
  * These assert the exact `ListInfoInput` shape SuperOps expects — page/pageSize
- * offsets and a single `RuleConditionInput` clause — plus the field selections,
- * so an invented field or a subselection on a JSON scalar cannot creep back in.
+ * offsets and the recursive `RuleConditionInput` tree — plus the field
+ * selections, so an invented field or a subselection on a JSON scalar cannot
+ * creep back in.
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
@@ -36,9 +37,22 @@ const INVENTED_CLIENT_FIELDS = [
   "annualRevenue",
   "address",
   "sites",
-  "createdTime",
   "lastUpdatedTime",
 ];
+
+/**
+ * Real `Client` fields we deliberately do not select: the live tenant returns
+ * null for both, so they cost bytes and buy nothing.
+ */
+const UNSELECTED_CLIENT_FIELDS = ["createdTime", "updatedTime"];
+
+/**
+ * Stage and status values published by `getAllFields(input: "CLIENT")` on the
+ * live API. Filtering on anything outside these silently matches zero clients,
+ * so a wrong enum here is a silent data-loss bug, not a loud one.
+ */
+const CLIENT_STAGES = ["Active", "Inactive", "Prospect"];
+const CLIENT_STATUSES = ["Paid", "Unpaid", "New", "Negotiation", "Won", "Lost"];
 
 /** JSON scalars — selecting a subfield on any of these is rejected by the API. */
 const JSON_SCALAR_FIELDS = [
@@ -66,11 +80,71 @@ describe("Clients Domain", () => {
     vi.clearAllMocks();
   });
 
+  // `hasMore` is null rather than false on the last page — that is what the live
+  // API returns, and the handlers pass listInfo through verbatim.
   const listResponse = (clients: unknown[] = []) => ({
     getClientList: {
       clients,
-      listInfo: { page: 1, pageSize: 50, totalCount: clients.length, hasMore: false },
+      listInfo: { page: 1, pageSize: 50, totalCount: clients.length, hasMore: null },
     },
+  });
+
+  /** Every `joinOperator` appearing anywhere in a condition tree. */
+  const joinOperatorsIn = (condition: unknown): string[] => {
+    if (condition === null || typeof condition !== "object") return [];
+    const node = condition as { joinOperator?: unknown; operands?: unknown };
+    const here = typeof node.joinOperator === "string" ? [node.joinOperator] : [];
+    const below = Array.isArray(node.operands) ? node.operands.flatMap(joinOperatorsIn) : [];
+    return [...here, ...below];
+  };
+
+  /**
+   * SuperOps silently ignores an unrecognised `joinOperator` and ORs the
+   * operands instead — lowercase "and" returns a superset with no error. Every
+   * compound we emit must therefore be uppercase.
+   */
+  const expectUppercaseJoins = (condition: unknown) => {
+    const joins = joinOperatorsIn(condition);
+    expect(joins.length).toBeGreaterThan(0);
+    for (const join of joins) {
+      expect(join, `joinOperator ${join} must be uppercase`).toBe(join.toUpperCase());
+      expect(["AND", "OR"]).toContain(join);
+    }
+  };
+
+  describe("joinOperator casing", () => {
+    it.each([
+      ["superops_clients_search", { query: "acme" }],
+      ["superops_clients_list", { stage: "Active", status: "Paid" }],
+    ])("%s emits only uppercase joinOperators", async (tool, args) => {
+      mockClient.query.mockResolvedValue(listResponse());
+
+      await getClientsTools().handleCall(tool, args);
+
+      expectUppercaseJoins(mockClient.query.mock.calls[0][1].input.condition);
+    });
+
+    it("emits an uppercase OR on the elicited search path", async () => {
+      vi.mocked(elicitText).mockResolvedValue("acme");
+      mockClient.query.mockResolvedValue(listResponse());
+
+      await getClientsTools().handleCall("superops_clients_list", {});
+
+      expectUppercaseJoins(mockClient.query.mock.calls[0][1].input.condition);
+    });
+
+    it("rejects the lowercase spelling that silently degrades to OR", async () => {
+      mockClient.query.mockResolvedValue(listResponse());
+
+      await getClientsTools().handleCall("superops_clients_list", {
+        stage: "Active",
+        status: "Paid",
+      });
+
+      const serialized = JSON.stringify(mockClient.query.mock.calls[0][1].input.condition);
+      expect(serialized).not.toContain('"and"');
+      expect(serialized).not.toContain('"or"');
+    });
   });
 
   describe("getClientsTools", () => {
@@ -108,6 +182,39 @@ describe("Clients Domain", () => {
       expect(tool?.inputSchema.properties.pageSize).toMatchObject({ default: 50 });
     });
 
+    /** The `enum` advertised for one property of `superops_clients_list`. */
+    const advertisedEnum = (property: string): string[] | undefined => {
+      const tool = getClientsTools().tools.find((t) => t.name === "superops_clients_list");
+      const schema = tool?.inputSchema.properties[property] as { enum?: string[] } | undefined;
+      return schema?.enum;
+    };
+
+    it("advertises the stage values the live API actually accepts", () => {
+      expect(advertisedEnum("stage")).toEqual(CLIENT_STAGES);
+    });
+
+    it("advertises the status values the live API actually accepts", () => {
+      expect(advertisedEnum("status")).toEqual(CLIENT_STATUSES);
+    });
+
+    it("does not advertise stage values that belong to no SuperOps stage", () => {
+      // The pre-live guesses. Each silently matched zero clients.
+      for (const bogus of ["Lead", "Customer", "Churned"]) {
+        expect(advertisedEnum("stage")).not.toContain(bogus);
+      }
+      // `Archived` was guessed for status; SuperOps has no such value.
+      expect(advertisedEnum("status")).not.toContain("Archived");
+    });
+
+    it("keeps stage and status vocabularies disjoint", () => {
+      const stages = advertisedEnum("stage") ?? [];
+      const statuses = advertisedEnum("status") ?? [];
+
+      // `Active`/`Inactive` are stages. Advertising them as statuses was the
+      // original bug and would filter nothing.
+      expect(statuses.filter((s) => stages.includes(s))).toEqual([]);
+    });
+
     it("calls query with default page/pageSize and name sort", async () => {
       mockClient.query.mockResolvedValue(listResponse([{ accountId: "1", name: "Test Client" }]));
 
@@ -131,13 +238,13 @@ describe("Clients Domain", () => {
       mockClient.query.mockResolvedValue(listResponse());
 
       const domain = getClientsTools();
-      await domain.handleCall("superops_clients_list", { status: "Active" });
+      await domain.handleCall("superops_clients_list", { status: "Paid" });
 
       expect(mockClient.query).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
           input: expect.objectContaining({
-            condition: { attribute: "status", operator: "includes", value: ["Active"] },
+            condition: { attribute: "status", operator: "includes", value: ["Paid"] },
           }),
         })
       );
@@ -147,34 +254,61 @@ describe("Clients Domain", () => {
       mockClient.query.mockResolvedValue(listResponse());
 
       const domain = getClientsTools();
-      await domain.handleCall("superops_clients_list", { stage: "Customer" });
+      await domain.handleCall("superops_clients_list", { stage: "Prospect" });
 
       expect(mockClient.query).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
           input: expect.objectContaining({
-            condition: { attribute: "stage", operator: "includes", value: ["Customer"] },
+            condition: { attribute: "stage", operator: "includes", value: ["Prospect"] },
           }),
         })
       );
     });
 
-    it("sends only one condition when status and stage are both given", async () => {
+    it("combines stage and status under an AND when both are given", async () => {
       mockClient.query.mockResolvedValue(listResponse());
 
       const domain = getClientsTools();
       await domain.handleCall("superops_clients_list", {
-        status: "Active",
-        stage: "Customer",
+        status: "Paid",
+        stage: "Active",
       });
 
       const input = mockClient.query.mock.calls[0][1].input;
       expect(input.condition).toEqual({
-        attribute: "status",
-        operator: "includes",
-        value: ["Active"],
+        joinOperator: "AND",
+        operands: [
+          { attribute: "stage", operator: "includes", value: ["Active"] },
+          { attribute: "status", operator: "includes", value: ["Paid"] },
+        ],
       });
-      expect(Array.isArray(input.condition)).toBe(false);
+    });
+
+    it("neither filter is dropped when both are given", async () => {
+      mockClient.query.mockResolvedValue(listResponse());
+
+      const domain = getClientsTools();
+      await domain.handleCall("superops_clients_list", {
+        status: "Paid",
+        stage: "Active",
+      });
+
+      // The old build kept only one clause, silently widening the result set.
+      const serialized = JSON.stringify(mockClient.query.mock.calls[0][1].input.condition);
+      expect(serialized).toContain("stage");
+      expect(serialized).toContain("status");
+    });
+
+    it("does not wrap a lone clause in a pointless compound", async () => {
+      mockClient.query.mockResolvedValue(listResponse());
+
+      const domain = getClientsTools();
+      await domain.handleCall("superops_clients_list", { stage: "Active" });
+
+      const condition = mockClient.query.mock.calls[0][1].input.condition;
+      expect(condition).not.toHaveProperty("joinOperator");
+      expect(condition).not.toHaveProperty("operands");
     });
 
     it("omits condition entirely when no filter is given", async () => {
@@ -225,7 +359,13 @@ describe("Clients Domain", () => {
           input: {
             page: 1,
             pageSize: 50,
-            condition: { attribute: "name", operator: "contains", value: "acme" },
+            condition: {
+              joinOperator: "OR",
+              operands: [
+                { attribute: "name", operator: "contains", value: "acme" },
+                { attribute: "emailDomains", operator: "contains", value: "acme" },
+              ],
+            },
             sort: [{ attribute: "name", order: "ASC" }],
           },
         }
@@ -237,7 +377,7 @@ describe("Clients Domain", () => {
       mockClient.query.mockResolvedValue(listResponse());
 
       const domain = getClientsTools();
-      await domain.handleCall("superops_clients_list", { status: "Active" });
+      await domain.handleCall("superops_clients_list", { status: "Paid" });
 
       expect(elicitText).not.toHaveBeenCalled();
     });
@@ -268,7 +408,7 @@ describe("Clients Domain", () => {
         getClient: {
           accountId: "acc-123",
           name: "Test Company",
-          status: "Active",
+          status: "Paid",
         },
       };
       mockClient.query.mockResolvedValue(mockResponse);
@@ -311,7 +451,13 @@ describe("Clients Domain", () => {
         input: {
           page: 1,
           pageSize: 50,
-          condition: { attribute: "name", operator: "contains", value: "acme" },
+          condition: {
+            joinOperator: "OR",
+            operands: [
+              { attribute: "name", operator: "contains", value: "acme" },
+              { attribute: "emailDomains", operator: "contains", value: "acme" },
+            ],
+          },
           sort: [{ attribute: "name", order: "ASC" }],
         },
       });
@@ -376,7 +522,7 @@ describe("Clients Domain", () => {
     };
 
     it("LIST_CLIENTS_QUERY selects real Client fields and offset listInfo", async () => {
-      const query = await queryFor("superops_clients_list", { status: "Active" });
+      const query = await queryFor("superops_clients_list", { status: "Paid" });
 
       for (const field of ["accountId", "name", "stage", "status", "emailDomains"]) {
         expect(query).toContain(field);
@@ -407,7 +553,7 @@ describe("Clients Domain", () => {
     });
 
     const allTools: [string, Record<string, unknown>][] = [
-      ["superops_clients_list", { status: "Active" }],
+      ["superops_clients_list", { status: "Paid" }],
       ["superops_clients_get", { accountId: "1" }],
       ["superops_clients_search", { query: "acme" }],
     ];
@@ -420,8 +566,16 @@ describe("Clients Domain", () => {
       }
     });
 
+    it.each(allTools)("%s selects no always-null timestamp field", async (tool, args) => {
+      const query = await queryFor(tool, args);
+
+      for (const field of UNSELECTED_CLIENT_FIELDS) {
+        expect(query, `${tool} must not select ${field}`).not.toContain(field);
+      }
+    });
+
     const jsonScalarTools: [string, Record<string, unknown>][] = [
-      ["superops_clients_list", { status: "Active" }],
+      ["superops_clients_list", { status: "Paid" }],
       ["superops_clients_get", { accountId: "1" }],
     ];
 

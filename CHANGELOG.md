@@ -64,6 +64,24 @@
   - The card's "Add note" round-trip always posts with `isPublic: false`. SuperOps controls note visibility with the `NotePrivacyType` enum (`PUBLIC`/`PRIVATE`); `superops_tickets_add_note` exposes that as an `isPublic` boolean and maps it, so an internal-only default keeps a note private unless someone opts in and the card never guesses visibility itself (`src/card.builder.ts`).
   - The card payload builder is best-effort: an unexpected ticket shape drops the card without affecting the tool result. 21 new contract tests in `src/mcp-apps.test.ts` pin the `_meta` advertisement, the `ui://` resource wire shape, the neutral-default/brand-injection behavior, and the card normalization.
 
+- **`superops_technicians_lookups`.** SuperOps returns a technician's `role`,
+  `team`, `designation` and `businessFunction` as opaque JSON, and filtering on
+  them needs an id, which nothing exposed. This resolves all four vocabularies
+  in one argument-less round trip.
+
+- **Offline schema conformance tests.** `schema/superops.graphql` vendors the
+  real SuperOps schema and `src/domains/graphql-schema.test.ts` validates every
+  GraphQL document in `src/` against it on each test run — no API credentials
+  required. The existing suite mocked the GraphQL client entirely, so 187 tests
+  passed while all 16 operations were unusable; this closes that gap.
+
+  `scripts/fetch-schema.mjs` regenerates the schema from **live introspection**
+  when `SUPEROPS_API_TOKEN` and `SUPEROPS_SUBDOMAIN` are set — authoritative,
+  since it is what the server will actually answer — and falls back to scraping
+  the published API reference otherwise, so CI and outside contributors can
+  still regenerate without credentials. Prefer introspection: the published docs
+  lag the live API, listing ~76 queries where introspection reports ~108.
+
 ### Fixed
 
 - **Every GraphQL operation was invalid against the SuperOps API.** All 16
@@ -94,16 +112,59 @@
     condition, sort }` and `ListInfo { page, pageSize, totalCount, hasMore }`.
   - **Operations that do not exist.** `getTechnician` (use a filtered
     `getTechnicianList`), `getTechGroupList` (it is `getTechnicianGroupList`,
-    which takes no arguments), `addTicketNote` (it is `createTicketNote`), and
+    which takes no arguments), `addTicketNote` (it is `createNote`), and
     `addTicketTimeEntry` (it is `createWorklogEntries`, which takes a list).
     The `AssetSoftwareListInput` and `AssetPatchInput` types do not exist
     either; both asset detail queries take `AssetDetailsListInput`.
 
-  All operations have been rewritten against the real schema. Tool names are
-  unchanged, but list tools now take `page`/`pageSize` instead of
-  `max`/`cursor`, and tools that implied multi-field filtering now document the
-  single attribute they match, because SuperOps accepts only one filter
-  condition per request.
+  All operations have been rewritten against the real schema and verified
+  against a live SuperOps tenant. Tool names are unchanged, but list tools now
+  take `page`/`pageSize` instead of `max`/`cursor`.
+
+- **`superops_tickets_add_note` called a mutation that does not exist.** Live
+  introspection lists 78 mutations and none of them is `createTicketNote`, so
+  every call would have failed. Notes go through
+  `createNote(input: CreateNoteInput!)`, addressed by
+  `workItem { workId, module: TICKET }` rather than `ticket { ticketId }`.
+  Offline conformance missed this because the vendored schema was scraped from
+  the published docs, which declare the phantom mutation — see the schema note
+  under Added.
+
+- **`getTicketList` returned nothing unless `ticketId` was selected.** Omitting
+  `ticketId` from the selection set yields an empty `tickets` array alongside a
+  correct, filter-aware `totalCount`, with no error. The query selects it and a
+  test now pins that it always will.
+
+- **Ticket field values that do not exist.** `superops_tickets_list` and the
+  elicitation prompt offered statuses `In Progress` and `Pending`; neither is
+  real. The tenant's values are `Open`, `On Hold`, `Resolved`, `Closed` and
+  `Waiting on third party`. `priority` was missing `Very Low`, and the
+  `TicketSource` enum shipped 6 of the API's 10 values (missing `SCHEDULE`,
+  `CONTRACT_REMINDER`, `CONTRACT`, `INSTANT_MESSAGING`). Values now come from
+  `getAllFields`, which returns a module's authoritative option lists in one
+  call; only `source` ships as an `enum`, because it is a real GraphQL enum —
+  the rest are per-tenant lookup lists typed `String`, where a hardcoded enum
+  would reject values the API accepts.
+
+- **Filters that silently matched nothing.** Live testing found three filters
+  that returned an empty list with no error — the worst failure mode, because
+  an empty result is indistinguishable from an empty tenant:
+  - `superops_clients_list` advertised stage `Lead/Prospect/Customer/Churned`
+    and status `Active/Inactive/Archived`. The tenant's real values are stage
+    `Active/Inactive/Prospect` and status
+    `Paid/Unpaid/New/Negotiation/Won/Lost` (status is scoped to its parent
+    stage). Every filter using an advertised value returned zero rows.
+  - `superops_assets_list` filtered `platform` with `includes: ["Windows"]`.
+    `includes` matches a value whole, and SuperOps stores the full OS string
+    (`"Microsoft Windows 10 Pro"`), so it matched nothing; it now uses
+    `contains`.
+  - `superops_assets_software` filtered the `software` JSON column instead of
+    the `software.name` path inside it, which the API accepts and answers with
+    an empty list.
+
+- **`hasMore` is tri-state.** It is `true` when another page exists and `null`
+  — never `false` — when it does not, so paging until `hasMore === false` never
+  terminates. Documented on `ListInfo`, and `totalCount` is the safer basis.
 
 - **Only the first GraphQL error was reported.** `SuperOpsClient.query` threw
   `errors[0]` and discarded the rest, so a query with ten schema violations
@@ -114,17 +175,14 @@
 - **`superops_test_connection` could prompt the user.** It delegated to
   `superops_clients_list`, which elicits a search term when called without
   filters. A connectivity check must never block on a prompt, so it now issues
-  its own minimal one-field query.
+  its own minimal query.
 
-### Added
-
-- **Offline schema conformance tests.** `schema/superops.graphql` vendors the
-  real SuperOps schema, generated from their published API reference by
-  `scripts/fetch-schema.mjs`, and `src/domains/graphql-schema.test.ts`
-  validates every GraphQL document in `src/` against it on each test run —
-  no API credentials required. The existing suite mocked the GraphQL client
-  entirely, so 187 tests passed while all 16 operations were unusable; this
-  closes that gap. Regenerate the schema after a SuperOps API change.
+- **`superops_test_connection` returned 500 from that minimal query.** Asking
+  `getClientList` for `listInfo` alone — without also selecting `clients` — is
+  valid GraphQL that SuperOps answers with an internal server error. Verified
+  against a live tenant; schema validation cannot catch it, so the ping now
+  selects one client id alongside the count and the query carries a comment
+  warning against "simplifying" it.
 
 - **deploy:** authenticate GitHub Packages in one-click cloud builds. Added the
   `_authToken` line to `.npmrc`, a build-time `GITHUB_TOKEN` secret to the
@@ -133,6 +191,21 @@
   packages during Cloudflare/DigitalOcean deploys.
 
 ### Changed
+
+- **Filters compose again.** The published docs describe `RuleConditionInput`
+  as a single flat `{attribute, operator, value}` clause, and the tools were
+  narrowed to match — `superops_clients_search` dropped its email-domain leg,
+  and the list tools applied one filter by precedence while silently discarding
+  the rest. Live introspection shows the type is recursive: it also carries
+  `joinOperator` and `operands`. Compound filtering is restored, so search
+  matches across fields again and list tools apply every filter given.
+
+  `joinOperator` must be **uppercase** (`"AND"`/`"OR"`). Anything the API does
+  not recognise — lowercase `"and"`, or junk — is silently ignored and the
+  operands are joined with `OR`, returning a superset with no error. The
+  `RuleConditionInput` type is deliberately typed `"AND" | "OR"` to make that
+  unrepresentable, and each domain's tests assert the emitted casing at every
+  nesting depth, since a regression would return plausible-looking rows.
 
 - **release:** publish the package to GitHub Packages (`npmPublish: true` plus a
   `publishConfig` registry) so the `@wyre-ai/superops-mcp` package is

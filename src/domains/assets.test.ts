@@ -84,17 +84,19 @@ describe("Assets Domain", () => {
       expect(tool?.inputSchema.properties).toHaveProperty("clientId");
     });
 
-    it("documents that only one filter condition applies per request", () => {
+    it("documents that several filters combine with AND", () => {
       const domain = getAssetsTools();
       const tool = domain.tools.find((t) => t.name === "superops_assets_list");
 
-      expect(tool?.description).toContain("single filter condition");
+      expect(tool?.description).toContain("AND");
+      expect(tool?.description).not.toContain("single filter condition");
+      expect(tool?.description).not.toContain("at most one");
     });
 
     it("calls query with default pagination and sort", async () => {
       const mockResponse = {
         getAssetList: {
-          assets: [{ assetId: "1", name: "DESKTOP-001", status: "Online" }],
+          assets: [{ assetId: "1", name: "DESKTOP-001", status: "ONLINE" }],
           listInfo: LIST_INFO,
         },
       };
@@ -122,19 +124,21 @@ describe("Assets Domain", () => {
       });
 
       const domain = getAssetsTools();
-      await domain.handleCall("superops_assets_list", { status: "Online" });
+      await domain.handleCall("superops_assets_list", { status: "ONLINE" });
 
       expect(mockClient.query).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
           input: expect.objectContaining({
-            condition: { attribute: "status", operator: "includes", value: ["Online"] },
+            condition: { attribute: "status", operator: "includes", value: ["ONLINE"] },
           }),
         })
       );
     });
 
-    it("applies platform filter as a single includes condition", async () => {
+    it("applies platform filter as a contains condition over a bare string", async () => {
+      // SuperOps stores the whole OS name ("Microsoft Windows 10 Pro"), so `includes`
+      // — which matches a value whole — finds nothing for a fragment like "Windows".
       mockClient.query.mockResolvedValue({
         getAssetList: { assets: [], listInfo: LIST_INFO },
       });
@@ -146,7 +150,7 @@ describe("Assets Domain", () => {
         expect.any(String),
         expect.objectContaining({
           input: expect.objectContaining({
-            condition: { attribute: "platform", operator: "includes", value: ["Windows"] },
+            condition: { attribute: "platform", operator: "contains", value: "Windows" },
           }),
         })
       );
@@ -186,17 +190,55 @@ describe("Assets Domain", () => {
       );
     });
 
-    it("rejects combined filters rather than silently dropping one", async () => {
+    it("combines several filters into one AND compound", async () => {
+      mockClient.query.mockResolvedValue({
+        getAssetList: { assets: [], listInfo: LIST_INFO },
+      });
+
       const domain = getAssetsTools();
       const result = await domain.handleCall("superops_assets_list", {
-        status: "Online",
+        status: "ONLINE",
         platform: "Windows",
         clientId: "client-123",
       });
 
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain("only one filter condition");
-      expect(mockClient.query).not.toHaveBeenCalled();
+      expect(result.isError).toBeUndefined();
+      expect(mockClient.query).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            condition: {
+              joinOperator: "AND",
+              operands: [
+                { attribute: "status", operator: "includes", value: ["ONLINE"] },
+                { attribute: "platform", operator: "contains", value: "Windows" },
+                { attribute: "client", operator: "includes", value: ["client-123"] },
+              ],
+            },
+          }),
+        })
+      );
+    });
+
+    it("sends a lone filter bare, not wrapped in a one-operand compound", async () => {
+      mockClient.query.mockResolvedValue({
+        getAssetList: { assets: [], listInfo: LIST_INFO },
+      });
+
+      const domain = getAssetsTools();
+      await domain.handleCall("superops_assets_list", { status: "ONLINE" });
+
+      const condition = (
+        mockClient.query.mock.calls[0][1] as { input: { condition: Record<string, unknown> } }
+      ).input.condition;
+
+      expect(condition).not.toHaveProperty("joinOperator");
+      expect(condition).not.toHaveProperty("operands");
+      expect(condition).toEqual({
+        attribute: "status",
+        operator: "includes",
+        value: ["ONLINE"],
+      });
     });
   });
 
@@ -224,9 +266,9 @@ describe("Assets Domain", () => {
         getAsset: {
           assetId: "asset-123",
           name: "WORKSTATION-001",
-          status: "Online",
-          platform: "Windows",
-          platformVersion: "23H2",
+          status: "ONLINE",
+          platform: "Microsoft Windows 10 Pro",
+          platformVersion: "10.0.19043 Build 19043",
         },
       };
       mockClient.query.mockResolvedValue(mockResponse);
@@ -243,7 +285,7 @@ describe("Assets Domain", () => {
         })
       );
       expect(result.content[0].text).toContain("WORKSTATION-001");
-      expect(result.content[0].text).toContain("23H2");
+      expect(result.content[0].text).toContain("10.0.19043 Build 19043");
     });
   });
 
@@ -287,7 +329,9 @@ describe("Assets Domain", () => {
       expect(result.content[0].text).toContain("Microsoft Office");
     });
 
-    it("applies search as a contains condition", async () => {
+    it("searches the software.name path, not the bare JSON column", async () => {
+      // `software` is a JSON object. Filtering the bare column matches nothing and
+      // returns an empty list rather than an error, so the wrong path fails silently.
       mockClient.query.mockResolvedValue({
         getAssetSoftwareList: { assetSoftwares: [], listInfo: LIST_INFO },
       });
@@ -304,7 +348,7 @@ describe("Assets Domain", () => {
           input: expect.objectContaining({
             assetId: "asset-123",
             listInfo: expect.objectContaining({
-              condition: { attribute: "software", operator: "contains", value: "chrome" },
+              condition: { attribute: "software.name", operator: "contains", value: "chrome" },
             }),
           }),
         })
@@ -351,8 +395,8 @@ describe("Assets Domain", () => {
         getAssetPatchDetails: {
           assetPatches: [
             {
-              patchDetail: { patchId: "patch-1", title: "Security Update", severity: "Critical" },
-              installationStatus: "Pending",
+              patchDetail: { patchId: "patch-1", title: "Security Update", severity: "Others" },
+              installationStatus: "NewOrMissing",
             },
           ],
           listInfo: LIST_INFO,
@@ -385,7 +429,7 @@ describe("Assets Domain", () => {
       const domain = getAssetsTools();
       await domain.handleCall("superops_assets_patches", {
         assetId: "asset-123",
-        installationStatus: "Pending",
+        installationStatus: "NewOrMissing",
       });
 
       expect(mockClient.query).toHaveBeenCalledWith(
@@ -396,7 +440,7 @@ describe("Assets Domain", () => {
               condition: {
                 attribute: "installationStatus",
                 operator: "includes",
-                value: ["Pending"],
+                value: ["NewOrMissing"],
               },
             }),
           }),
@@ -412,7 +456,7 @@ describe("Assets Domain", () => {
       const domain = getAssetsTools();
       await domain.handleCall("superops_assets_patches", {
         assetId: "asset-123",
-        severity: ["Critical", "Important"],
+        severity: ["Others", "Recommended"],
       });
 
       expect(mockClient.query).toHaveBeenCalledWith(
@@ -423,7 +467,7 @@ describe("Assets Domain", () => {
               condition: {
                 attribute: "severity",
                 operator: "includes",
-                value: ["Critical", "Important"],
+                value: ["Others", "Recommended"],
               },
             }),
           }),
@@ -431,17 +475,39 @@ describe("Assets Domain", () => {
       );
     });
 
-    it("rejects combined installationStatus and severity filters", async () => {
+    it("combines installationStatus and severity into one AND compound", async () => {
+      mockClient.query.mockResolvedValue({
+        getAssetPatchDetails: { assetPatches: [], listInfo: LIST_INFO },
+      });
+
       const domain = getAssetsTools();
       const result = await domain.handleCall("superops_assets_patches", {
         assetId: "asset-123",
-        installationStatus: "Pending",
-        severity: ["Critical"],
+        installationStatus: "Installed",
+        severity: ["Others"],
       });
 
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain("only one filter condition");
-      expect(mockClient.query).not.toHaveBeenCalled();
+      expect(result.isError).toBeUndefined();
+      expect(mockClient.query).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            listInfo: expect.objectContaining({
+              condition: {
+                joinOperator: "AND",
+                operands: [
+                  {
+                    attribute: "installationStatus",
+                    operator: "includes",
+                    value: ["Installed"],
+                  },
+                  { attribute: "severity", operator: "includes", value: ["Others"] },
+                ],
+              },
+            }),
+          }),
+        })
+      );
     });
   });
 
@@ -597,6 +663,129 @@ describe("Assets Domain", () => {
         expect(query, tool).not.toContain("hasNextPage");
         expect(query, tool).not.toContain("endCursor");
         vi.clearAllMocks();
+      }
+    });
+  });
+
+  describe("Advertised filter values", () => {
+    /**
+     * The schema types every one of these as `String`, not an enum, so the
+     * allowed values are tenant data. Advertising a guessed `enum` would make
+     * the MCP client reject values SuperOps accepts — the exact failure the
+     * clients domain shipped when it claimed a Lead/Prospect/Customer/Churned
+     * stage against a tenant using Active/Inactive/Prospect.
+     */
+    const VALUE_FIELDS: [string, string][] = [
+      ["superops_assets_list", "status"],
+      ["superops_assets_list", "platform"],
+      ["superops_assets_patches", "installationStatus"],
+      ["superops_assets_patches", "severity"],
+    ];
+
+    it.each(VALUE_FIELDS)("%s.%s advertises no enum", (toolName, field) => {
+      const tool = getAssetsTools().tools.find((t) => t.name === toolName);
+      const prop = (tool?.inputSchema.properties as Record<string, Record<string, unknown>>)[
+        field
+      ];
+
+      expect(prop, `${toolName}.${field}`).toBeDefined();
+      expect(prop, `${toolName}.${field}`).not.toHaveProperty("enum");
+      expect(prop.items ?? {}, `${toolName}.${field} items`).not.toHaveProperty("enum");
+    });
+
+    it.each(VALUE_FIELDS)("%s.%s documents the values observed live", (toolName, field) => {
+      const tool = getAssetsTools().tools.find((t) => t.name === toolName);
+      const prop = (tool?.inputSchema.properties as Record<string, { description?: string }>)[
+        field
+      ];
+
+      // Observed on a live tenant; recorded so a caller has something to go on
+      // without the schema pretending the set is closed.
+      const observed: Record<string, string[]> = {
+        status: ["ONLINE", "OFFLINE"],
+        platform: ["Microsoft Windows 10 Pro", "darwin"],
+        installationStatus: ["Installed", "NewOrMissing"],
+        severity: ["Others", "Recommended"],
+      };
+
+      for (const value of observed[field]) {
+        expect(prop.description, `${toolName}.${field}`).toContain(value);
+      }
+    });
+
+    it("does not describe patch severity in Windows CVSS terms it never returns", () => {
+      const tool = getAssetsTools().tools.find((t) => t.name === "superops_assets_patches");
+      const severity = (
+        tool?.inputSchema.properties as Record<string, { description?: string }>
+      ).severity;
+
+      for (const invented of ["Critical", "Important", "Moderate", "Low"]) {
+        expect(severity.description, invented).not.toContain(invented);
+      }
+    });
+
+    it("warns that hasMore is null rather than false at the end of a list", () => {
+      // Live: hasMore is true with a further page and null without one — a caller
+      // testing `hasMore === false` would loop forever.
+      const tool = getAssetsTools().tools.find((t) => t.name === "superops_assets_list");
+      expect(tool?.description).toContain("hasMore");
+      expect(tool?.description).toContain("null");
+      expect(tool?.description).toContain("totalCount");
+    });
+  });
+
+  describe("Compound filter conditions", () => {
+    /**
+     * SuperOps silently treats any joinOperator it does not recognise — including
+     * lowercase "and" — as OR, with no error. A regression here does not fail
+     * loudly; it quietly returns a SUPERSET of the rows the caller asked for.
+     *
+     * Live, on identical operands [status includes ONLINE, platform contains
+     * Windows] against a 3-asset tenant:
+     *   "AND"    -> 1   (the one online Windows box)
+     *   "OR"     -> 3
+     *   "and"    -> 3   (silently OR)
+     *   "banana" -> 3   (silently OR)
+     */
+    const COMPOUND_CASES: [string, Record<string, unknown>][] = [
+      [
+        "superops_assets_list",
+        { status: "ONLINE", platform: "Windows", clientId: "client-1" },
+      ],
+      [
+        "superops_assets_patches",
+        { assetId: "a-1", installationStatus: "Installed", severity: ["Others"] },
+      ],
+    ];
+
+    it.each(COMPOUND_CASES)("%s emits an uppercase AND join", async (toolName, args) => {
+      mockClient.query.mockResolvedValue({});
+      await getAssetsTools().handleCall(toolName, args);
+
+      const input = (mockClient.query.mock.calls[0][1] as { input: Record<string, unknown> })
+        .input;
+      const listInfo = input.listInfo as Record<string, unknown> | undefined;
+      const condition = (listInfo?.condition ?? input.condition) as {
+        joinOperator: string;
+        operands: unknown[];
+      };
+
+      expect(condition.joinOperator).toBe("AND");
+      // Not merely uppercase-insensitively equal — the exact token matters.
+      expect(condition.joinOperator).not.toBe("and");
+      expect(condition.operands.length).toBeGreaterThan(1);
+    });
+
+    it("never emits a join token SuperOps would silently reduce to OR", async () => {
+      mockClient.query.mockResolvedValue({});
+      await getAssetsTools().handleCall("superops_assets_list", {
+        status: "ONLINE",
+        platform: "Windows",
+      });
+
+      const serialised = JSON.stringify(mockClient.query.mock.calls[0][1]);
+      for (const bad of ['"joinOperator":"and"', '"joinOperator":"or"']) {
+        expect(serialised, bad).not.toContain(bad);
       }
     });
   });
