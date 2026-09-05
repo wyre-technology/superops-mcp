@@ -215,9 +215,15 @@
   unrepresentable, and each domain's tests assert the emitted casing at every
   nesting depth, since a regression would return plausible-looking rows.
 
-- **release:** publish the package to GitHub Packages (`npmPublish: true` plus a
-  `publishConfig` registry) so the `@wyre-ai/superops-mcp` package is
-  available to install.
+- **release:** this server ships as a container image
+  (`ghcr.io/wyre-ai/superops-mcp`) and an MCP Registry entry, not as an npm
+  package — `npmPublish` is `false` (ae107a6), which also avoids the 401/403
+  the publish step hit. An earlier Unreleased entry claimed GitHub Packages
+  publishing had been turned on; that change was reverted before release, so
+  the claim is corrected here rather than shipped. The `.npmrc` / Dockerfile /
+  DigitalOcean token plumbing above is still needed — it authenticates
+  *installing* `@wyre-ai/*` build dependencies, which is a separate concern
+  from publishing this package.
 
 ## [1.2.5](https://github.com/WYRE-AI/superops-mcp/compare/v1.2.4...v1.2.5) (2026-04-07)
 
