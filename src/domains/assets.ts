@@ -15,9 +15,7 @@
 
 import { getClient } from "../client.js";
 import type { DomainTools, Asset, AssetSoftware, ListInfo, PatchData } from "../types.js";
-
-const DEFAULT_PAGE_SIZE = 50;
-const MAX_PAGE_SIZE = 100;
+import { paging, PAGE_PROPERTIES } from "../utils/paging.js";
 
 const LIST_ASSETS_QUERY = `
   query getAssetList($input: ListInfoInput!) {
@@ -189,30 +187,6 @@ function singleCondition(candidates: (Condition | undefined)[]): Condition | und
   }
   return clauses[0];
 }
-
-/** page/pageSize offsets, clamped to the documented maximum. */
-function paging(params: { page?: number; pageSize?: number }): {
-  page: number;
-  pageSize: number;
-} {
-  return {
-    page: params.page ?? 1,
-    pageSize: Math.min(params.pageSize ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
-  };
-}
-
-const PAGE_PROPERTIES = {
-  page: {
-    type: "number",
-    description: "Page number, 1-based (default: 1)",
-    default: 1,
-  },
-  pageSize: {
-    type: "number",
-    description: `Results per page (default: ${DEFAULT_PAGE_SIZE}, max: ${MAX_PAGE_SIZE})`,
-    default: DEFAULT_PAGE_SIZE,
-  },
-} as const;
 
 export function getAssetsTools(): DomainTools {
   return {

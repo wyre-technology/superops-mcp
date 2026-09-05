@@ -18,9 +18,7 @@ import type {
   RuleConditionInput,
 } from "../types.js";
 import { elicitText } from "../utils/elicitation.js";
-
-const DEFAULT_PAGE_SIZE = 50;
-const MAX_PAGE_SIZE = 100;
+import { pageOf, pageSizeOf, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "../utils/paging.js";
 
 const LIST_CLIENTS_QUERY = `
   query getClientList($input: ListInfoInput!) {
@@ -92,14 +90,6 @@ interface ListClientsResponse {
 
 interface GetClientResponse {
   getClient: Client;
-}
-
-function pageOf(page?: number): number {
-  return Math.max(Math.trunc(page ?? 1), 1);
-}
-
-function pageSizeOf(pageSize?: number): number {
-  return Math.min(Math.max(Math.trunc(pageSize ?? DEFAULT_PAGE_SIZE), 1), MAX_PAGE_SIZE);
 }
 
 /**

@@ -22,10 +22,8 @@ import type {
   RuleConditionInput,
 } from "../types.js";
 import { elicitText } from "../utils/elicitation.js";
+import { pageOf, pageSizeOf, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "../utils/paging.js";
 import { buildTicketCard, TICKET_CARD_META } from "../card.builder.js";
-
-const DEFAULT_PAGE_SIZE = 50;
-const MAX_PAGE_SIZE = 100;
 
 const LIST_TICKETS_QUERY = `
   query getTicketList($input: ListInfoInput!) {
@@ -188,14 +186,6 @@ interface CreateTicketNoteResponse {
 
 interface CreateWorklogEntriesResponse {
   createWorklogEntries: WorklogEntry[];
-}
-
-function pageOf(page?: number): number {
-  return Math.max(Math.trunc(page ?? 1), 1);
-}
-
-function pageSizeOf(pageSize?: number): number {
-  return Math.min(Math.max(Math.trunc(pageSize ?? DEFAULT_PAGE_SIZE), 1), MAX_PAGE_SIZE);
 }
 
 /**

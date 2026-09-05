@@ -12,6 +12,7 @@
 
 import { getClient } from "../client.js";
 import type { DomainTools, Technician, TechnicianGroup, ListInfo } from "../types.js";
+import { paging, PAGE_PROPERTIES } from "../utils/paging.js";
 
 /**
  * The selection below is every field the real `Technician` type defines. It is
@@ -104,13 +105,6 @@ interface ListTechGroupsResponse {
   getTechnicianGroupList: TechnicianGroup[] | null;
 }
 
-const DEFAULT_PAGE_SIZE = 50;
-const MAX_PAGE_SIZE = 100;
-
-function clampPageSize(pageSize?: number): number {
-  return Math.min(Math.max(pageSize ?? DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
-}
-
 export function getTechniciansTools(): DomainTools {
   return {
     tools: [
@@ -129,16 +123,7 @@ export function getTechniciansTools(): DomainTools {
               type: "string",
               description: "Substring match on the technician's name",
             },
-            page: {
-              type: "number",
-              description: "Page number, 1-based (default: 1)",
-              default: 1,
-            },
-            pageSize: {
-              type: "number",
-              description: "Results per page (default: 50, max: 100)",
-              default: DEFAULT_PAGE_SIZE,
-            },
+            ...PAGE_PROPERTIES,
           },
         },
       },
@@ -190,8 +175,7 @@ export function getTechniciansTools(): DomainTools {
               LIST_TECHNICIANS_QUERY,
               {
                 input: {
-                  page: params.page ?? 1,
-                  pageSize: clampPageSize(params.pageSize),
+                  ...paging(params),
                   ...(params.search && {
                     condition: {
                       attribute: "name",
