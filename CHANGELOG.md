@@ -61,10 +61,70 @@
 - **Interactive ticket card via MCP Apps (SEP-1865).** `superops_tickets_get` results now render as an interactive card in MCP Apps hosts (Claude Desktop/web, and other hosts advertising the `io.modelcontextprotocol/ui` extension), instead of a wall of JSON. The card shows status, priority, client, requester, assignee, tech group, category, and site as human-readable labels, key dates, and a plain-text description snippet — and includes a working "Add note" round-trip that calls `superops_tickets_add_note` from inside the card. Non-App hosts are unaffected: the tool's JSON payload is unchanged apart from a new `_card` field.
   - The two renderable tools advertise the UI via `_meta` (`ui/resourceUri`, plus the nested `ui.resourceUri` form) pointing at a new `ui://superops/ticket-card.html` resource served as `text/html;profile=mcp-app`. The card HTML is a self-contained vite single-file bundle embedded at build time (`src/generated/ticket-card-html.ts`, committed), so it serves identically from stdio, Node HTTP, and the fs-less Cloudflare Workers runtime. The server now declares the `resources` capability and answers `resources/list` / `resources/read` (`src/resources.ts`).
   - The card is neutral by default (system fonts, no vendor identity, no external fetches) and brandable via `window.__BRAND__` injection or `MCP_BRAND_*` env vars (`MCP_BRAND_NAME`, `MCP_BRAND_LOGO_URL`, `MCP_BRAND_PRIMARY_COLOR`, `MCP_BRAND_ACCENT_COLOR`, `MCP_BRAND_BG`, `MCP_BRAND_TEXT`): at serve time the server replaces the card's BRAND_INJECT marker with an inline, `<`-escaped `window.__BRAND__` script, so self-hosters can theme the card without rebuilding. No brand configured = HTML served unchanged.
-  - The card's "Add note" round-trip always posts with `isPublic: false` — SuperOps' client-portal visibility control on a note is a universal boolean (not a tenant-specific enum), so an internal-only default is safe everywhere and the card never guesses visibility itself (`src/card.builder.ts`).
+  - The card's "Add note" round-trip always posts with `isPublic: false`. SuperOps controls note visibility with the `NotePrivacyType` enum (`PUBLIC`/`PRIVATE`); `superops_tickets_add_note` exposes that as an `isPublic` boolean and maps it, so an internal-only default keeps a note private unless someone opts in and the card never guesses visibility itself (`src/card.builder.ts`).
   - The card payload builder is best-effort: an unexpected ticket shape drops the card without affecting the tool result. 21 new contract tests in `src/mcp-apps.test.ts` pin the `_meta` advertisement, the `ui://` resource wire shape, the neutral-default/brand-injection behavior, and the card normalization.
 
 ### Fixed
+
+- **Every GraphQL operation was invalid against the SuperOps API.** All 16
+  queries and mutations had been written against an invented schema, so no tool
+  in this server could complete a call. `superops_clients_list` and
+  `superops_test_connection` both failed with
+  `Validation error ... Field 'phone' in type 'Client' is undefined` — but
+  `phone` was only the *first* of ten errors on that one query, and every other
+  operation was broken too. Specifically:
+  - **Fields that do not exist.** `Client` has no `phone`, `website`,
+    `industry`, `employeeCount`, `annualRevenue`, `address`, `sites`,
+    `createdTime` or `lastUpdatedTime`. `Ticket` has no `ticketNumber`
+    (it is `displayId`), no `assignee` (it is `technician`), no
+    `lastUpdatedTime` (it is `updatedTime`) and no readable `description`.
+    `Asset` has no `ipAddress`, `macAddress` (it is `primaryMac`), `hostname`
+    (it is `hostName`), `osName`/`osVersion`/`osBuild`/`architecture` (they are
+    `platform*`), CPU/memory/disk fields, `tags` or `lastSeen`. `Technician`
+    has no `id` (it is `userId`), no `phone` (it is `contactNumber`), and none
+    of `isActive`/`department`/`teams`/`manager`/`skills`/`ticketCount`/
+    `lastLoginTime`.
+  - **Subselections on JSON scalars.** `client`, `site`, `requester`,
+    `technician`, `techGroup`, `accountManager`, `primaryContact`,
+    `customFields` and friends are the `JSON` scalar. The old queries selected
+    subfields on them (`client { id name }`), which GraphQL rejects outright.
+  - **The wrong pagination model.** The server sent Relay-style
+    `first`/`after`/`filter`/`orderBy` and selected `hasNextPage`/`endCursor`.
+    SuperOps uses offset pagination: `ListInfoInput { page, pageSize,
+    condition, sort }` and `ListInfo { page, pageSize, totalCount, hasMore }`.
+  - **Operations that do not exist.** `getTechnician` (use a filtered
+    `getTechnicianList`), `getTechGroupList` (it is `getTechnicianGroupList`,
+    which takes no arguments), `addTicketNote` (it is `createTicketNote`), and
+    `addTicketTimeEntry` (it is `createWorklogEntries`, which takes a list).
+    The `AssetSoftwareListInput` and `AssetPatchInput` types do not exist
+    either; both asset detail queries take `AssetDetailsListInput`.
+
+  All operations have been rewritten against the real schema. Tool names are
+  unchanged, but list tools now take `page`/`pageSize` instead of
+  `max`/`cursor`, and tools that implied multi-field filtering now document the
+  single attribute they match, because SuperOps accepts only one filter
+  condition per request.
+
+- **Only the first GraphQL error was reported.** `SuperOpsClient.query` threw
+  `errors[0]` and discarded the rest, so a query with ten schema violations
+  surfaced as a single complaint about `phone` and sent debugging down the
+  wrong path. It now reports every error and exposes them on
+  `SuperOpsError.errors`.
+
+- **`superops_test_connection` could prompt the user.** It delegated to
+  `superops_clients_list`, which elicits a search term when called without
+  filters. A connectivity check must never block on a prompt, so it now issues
+  its own minimal one-field query.
+
+### Added
+
+- **Offline schema conformance tests.** `schema/superops.graphql` vendors the
+  real SuperOps schema, generated from their published API reference by
+  `scripts/fetch-schema.mjs`, and `src/domains/graphql-schema.test.ts`
+  validates every GraphQL document in `src/` against it on each test run —
+  no API credentials required. The existing suite mocked the GraphQL client
+  entirely, so 187 tests passed while all 16 operations were unusable; this
+  closes that gap. Regenerate the schema after a SuperOps API change.
 
 - **deploy:** authenticate GitHub Packages in one-click cloud builds. Added the
   `_authToken` line to `.npmrc`, a build-time `GITHUB_TOKEN` secret to the

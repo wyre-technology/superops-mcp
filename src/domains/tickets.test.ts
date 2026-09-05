@@ -2,6 +2,12 @@
  * Tickets Domain Tests
  *
  * Tests for service ticket management tools.
+ *
+ * The GraphQL documents themselves are validated against the vendored schema
+ * by graphql-schema.test.ts; these tests cover the request shapes the handlers
+ * build — page/pageSize pagination, the single-condition filter, the
+ * JSON-scalar identifier inputs, and the note/worklog mutations that replaced
+ * the invented addTicketNote/addTicketTimeEntry pair.
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
@@ -53,6 +59,13 @@ describe("Tickets Domain", () => {
   });
 
   describe("superops_tickets_list tool", () => {
+    const emptyList = {
+      getTicketList: {
+        tickets: [],
+        listInfo: { page: 1, pageSize: 50, totalCount: 0, hasMore: false },
+      },
+    };
+
     it("has correct definition", () => {
       const domain = getTicketsTools();
       const tool = domain.tools.find((t) => t.name === "superops_tickets_list");
@@ -62,18 +75,28 @@ describe("Tickets Domain", () => {
       expect(tool?.inputSchema.properties).toHaveProperty("status");
       expect(tool?.inputSchema.properties).toHaveProperty("priority");
       expect(tool?.inputSchema.properties).toHaveProperty("clientId");
-      expect(tool?.inputSchema.properties).toHaveProperty("assigneeId");
-      expect(tool?.inputSchema.properties).toHaveProperty("unassigned");
+      expect(tool?.inputSchema.properties).toHaveProperty("technicianId");
+      expect(tool?.inputSchema.properties).toHaveProperty("page");
+      expect(tool?.inputSchema.properties).toHaveProperty("pageSize");
     });
 
-    it("calls query with default parameters", async () => {
-      const mockResponse = {
+    it("does not advertise the removed Relay/assignee parameters", () => {
+      const domain = getTicketsTools();
+      const tool = domain.tools.find((t) => t.name === "superops_tickets_list");
+
+      expect(tool?.inputSchema.properties).not.toHaveProperty("max");
+      expect(tool?.inputSchema.properties).not.toHaveProperty("cursor");
+      expect(tool?.inputSchema.properties).not.toHaveProperty("assigneeId");
+      expect(tool?.inputSchema.properties).not.toHaveProperty("unassigned");
+    });
+
+    it("calls query with page/pageSize defaults and a sort clause", async () => {
+      mockClient.query.mockResolvedValue({
         getTicketList: {
-          tickets: [{ ticketId: "1", subject: "Test Ticket" }],
-          listInfo: { totalCount: 1, hasNextPage: false },
+          tickets: [{ ticketId: "1", displayId: "#1", subject: "Test Ticket" }],
+          listInfo: { page: 1, pageSize: 50, totalCount: 1, hasMore: false },
         },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+      });
 
       const domain = getTicketsTools();
       const result = await domain.handleCall("superops_tickets_list", {});
@@ -81,23 +104,37 @@ describe("Tickets Domain", () => {
       expect(mockClient.query).toHaveBeenCalledWith(
         expect.stringContaining("getTicketList"),
         expect.objectContaining({
-          input: expect.objectContaining({
-            first: 50,
-            orderBy: { field: "createdTime", direction: "DESC" },
-          }),
+          input: {
+            page: 1,
+            pageSize: 50,
+            sort: [{ attribute: "createdTime", order: "DESC" }],
+          },
         })
       );
       expect(result.content[0].text).toContain("Test Ticket");
     });
 
-    it("applies status filter as array", async () => {
-      const mockResponse = {
-        getTicketList: {
-          tickets: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("selects only fields the schema defines on Ticket", async () => {
+      mockClient.query.mockResolvedValue(emptyList);
+
+      const domain = getTicketsTools();
+      await domain.handleCall("superops_tickets_list", {});
+
+      const [document] = mockClient.query.mock.calls[0] as [string];
+      expect(document).toContain("displayId");
+      expect(document).toContain("updatedTime");
+      expect(document).toContain("technician");
+      expect(document).not.toContain("ticketNumber");
+      expect(document).not.toContain("lastUpdatedTime");
+      expect(document).not.toContain("assignee");
+      // page/pageSize offsets, not Relay cursors
+      expect(document).toContain("hasMore");
+      expect(document).not.toContain("hasNextPage");
+      expect(document).not.toContain("endCursor");
+    });
+
+    it("applies status as an includes condition", async () => {
+      mockClient.query.mockResolvedValue(emptyList);
 
       const domain = getTicketsTools();
       await domain.handleCall("superops_tickets_list", {
@@ -108,22 +145,18 @@ describe("Tickets Domain", () => {
         expect.any(String),
         expect.objectContaining({
           input: expect.objectContaining({
-            filter: expect.objectContaining({
-              status: ["Open", "In Progress"],
-            }),
+            condition: {
+              attribute: "status",
+              operator: "includes",
+              value: ["Open", "In Progress"],
+            },
           }),
         })
       );
     });
 
-    it("applies priority filter", async () => {
-      const mockResponse = {
-        getTicketList: {
-          tickets: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("applies priority as an includes condition", async () => {
+      mockClient.query.mockResolvedValue(emptyList);
 
       const domain = getTicketsTools();
       await domain.handleCall("superops_tickets_list", {
@@ -134,22 +167,18 @@ describe("Tickets Domain", () => {
         expect.any(String),
         expect.objectContaining({
           input: expect.objectContaining({
-            filter: expect.objectContaining({
-              priority: ["High", "Critical"],
-            }),
+            condition: {
+              attribute: "priority",
+              operator: "includes",
+              value: ["High", "Critical"],
+            },
           }),
         })
       );
     });
 
-    it("applies clientId filter", async () => {
-      const mockResponse = {
-        getTicketList: {
-          tickets: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("applies clientId as an includes condition", async () => {
+      mockClient.query.mockResolvedValue(emptyList);
 
       const domain = getTicketsTools();
       await domain.handleCall("superops_tickets_list", { clientId: "client-123" });
@@ -158,34 +187,68 @@ describe("Tickets Domain", () => {
         expect.any(String),
         expect.objectContaining({
           input: expect.objectContaining({
-            filter: expect.objectContaining({
-              client: { accountId: "client-123" },
-            }),
+            condition: {
+              attribute: "client",
+              operator: "includes",
+              value: ["client-123"],
+            },
           }),
         })
       );
     });
 
-    it("filters for unassigned tickets", async () => {
-      const mockResponse = {
-        getTicketList: {
-          tickets: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("applies technicianId as an includes condition", async () => {
+      mockClient.query.mockResolvedValue(emptyList);
 
       const domain = getTicketsTools();
-      await domain.handleCall("superops_tickets_list", { unassigned: true });
+      await domain.handleCall("superops_tickets_list", { technicianId: "tech-456" });
 
       expect(mockClient.query).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
           input: expect.objectContaining({
-            filter: expect.objectContaining({
-              assignee: null,
-            }),
+            condition: {
+              attribute: "technician",
+              operator: "includes",
+              value: ["tech-456"],
+            },
           }),
+        })
+      );
+    });
+
+    it("sends only one condition when several filters are supplied", async () => {
+      mockClient.query.mockResolvedValue(emptyList);
+
+      const domain = getTicketsTools();
+      await domain.handleCall("superops_tickets_list", {
+        status: ["Open"],
+        priority: ["High"],
+        clientId: "client-123",
+        technicianId: "tech-456",
+      });
+
+      const [, variables] = mockClient.query.mock.calls[0] as [
+        string,
+        { input: { condition?: unknown } },
+      ];
+      expect(variables.input.condition).toEqual({
+        attribute: "status",
+        operator: "includes",
+        value: ["Open"],
+      });
+    });
+
+    it("clamps pageSize to the documented maximum", async () => {
+      mockClient.query.mockResolvedValue(emptyList);
+
+      const domain = getTicketsTools();
+      await domain.handleCall("superops_tickets_list", { page: 3, pageSize: 5000 });
+
+      expect(mockClient.query).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          input: expect.objectContaining({ page: 3, pageSize: 100 }),
         })
       );
     });
@@ -202,14 +265,14 @@ describe("Tickets Domain", () => {
     });
 
     it("calls query with ticketId", async () => {
-      const mockResponse = {
+      mockClient.query.mockResolvedValue({
         getTicket: {
           ticketId: "ticket-123",
+          displayId: "#123",
           subject: "Test Issue",
           status: "Open",
         },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+      });
 
       const domain = getTicketsTools();
       const result = await domain.handleCall("superops_tickets_get", {
@@ -224,6 +287,75 @@ describe("Tickets Domain", () => {
       );
       expect(result.content[0].text).toContain("Test Issue");
     });
+
+    it("selects the fields the ticket card maps from", async () => {
+      mockClient.query.mockResolvedValue({ getTicket: { ticketId: "t1" } });
+
+      const domain = getTicketsTools();
+      await domain.handleCall("superops_tickets_get", { ticketId: "t1" });
+
+      const [document] = mockClient.query.mock.calls[0] as [string];
+      for (const field of [
+        "ticketId",
+        "displayId",
+        "subject",
+        "status",
+        "priority",
+        "category",
+        "createdTime",
+        "updatedTime",
+        "client",
+        "site",
+        "requester",
+        "techGroup",
+        "technician",
+      ]) {
+        expect(document).toContain(field);
+      }
+      // `description` is write-only on CreateTicketInput; Ticket has no such field.
+      expect(document).not.toContain("description");
+    });
+
+    it("selects JSON scalars bare, with no subselection", async () => {
+      mockClient.query.mockResolvedValue({ getTicket: { ticketId: "t1" } });
+
+      const domain = getTicketsTools();
+      await domain.handleCall("superops_tickets_get", { ticketId: "t1" });
+
+      const [document] = mockClient.query.mock.calls[0] as [string];
+      for (const scalar of [
+        "client",
+        "site",
+        "requester",
+        "techGroup",
+        "technician",
+        "sla",
+        "customFields",
+      ]) {
+        expect(document).not.toMatch(new RegExp(`${scalar}\\s*\\{`));
+      }
+    });
+
+    it("attaches an MCP Apps card payload", async () => {
+      mockClient.query.mockResolvedValue({
+        getTicket: {
+          ticketId: "ticket-123",
+          displayId: "#123",
+          subject: "Printer offline",
+          status: "Open",
+        },
+      });
+
+      const domain = getTicketsTools();
+      const result = await domain.handleCall("superops_tickets_get", {
+        ticketId: "ticket-123",
+      });
+
+      const payload = JSON.parse(result.content[0].text as string) as {
+        _card?: { ticketId?: string };
+      };
+      expect(payload._card?.ticketId).toBe("ticket-123");
+    });
   });
 
   describe("superops_tickets_create tool", () => {
@@ -236,19 +368,22 @@ describe("Tickets Domain", () => {
       expect(tool?.inputSchema.properties).toHaveProperty("description");
       expect(tool?.inputSchema.properties).toHaveProperty("clientId");
       expect(tool?.inputSchema.properties).toHaveProperty("priority");
+      expect(tool?.inputSchema.properties).toHaveProperty("source");
+      expect(tool?.inputSchema.properties).toHaveProperty("requesterId");
+      expect(tool?.inputSchema.properties).toHaveProperty("techGroupId");
+      expect(tool?.inputSchema.properties).toHaveProperty("technicianId");
       expect(tool?.inputSchema.required).toContain("subject");
       expect(tool?.inputSchema.required).toContain("clientId");
     });
 
-    it("calls mutate with required fields", async () => {
-      const mockResponse = {
+    it("calls mutate with required fields and a default source", async () => {
+      mockClient.mutate.mockResolvedValue({
         createTicket: {
           ticketId: "new-ticket",
-          ticketNumber: "TKT-001",
+          displayId: "#001",
           subject: "New Issue",
         },
-      };
-      mockClient.mutate.mockResolvedValue(mockResponse);
+      });
 
       const domain = getTicketsTools();
       const result = await domain.handleCall("superops_tickets_create", {
@@ -259,20 +394,38 @@ describe("Tickets Domain", () => {
       expect(mockClient.mutate).toHaveBeenCalledWith(
         expect.stringContaining("createTicket"),
         expect.objectContaining({
-          input: expect.objectContaining({
+          input: {
             subject: "New Issue",
             client: { accountId: "client-123" },
-          }),
+            source: "INTEGRATION",
+          },
         })
       );
       expect(result.content[0].text).toContain("new-ticket");
     });
 
-    it("includes optional fields when provided", async () => {
-      const mockResponse = {
+    it("honours an explicit source", async () => {
+      mockClient.mutate.mockResolvedValue({ createTicket: { ticketId: "new-ticket" } });
+
+      const domain = getTicketsTools();
+      await domain.handleCall("superops_tickets_create", {
+        subject: "Phoned in",
+        clientId: "client-123",
+        source: "PHONE",
+      });
+
+      expect(mockClient.mutate).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          input: expect.objectContaining({ source: "PHONE" }),
+        })
+      );
+    });
+
+    it("maps optional fields to their identifier inputs", async () => {
+      mockClient.mutate.mockResolvedValue({
         createTicket: { ticketId: "new-ticket", subject: "Issue" },
-      };
-      mockClient.mutate.mockResolvedValue(mockResponse);
+      });
 
       const domain = getTicketsTools();
       await domain.handleCall("superops_tickets_create", {
@@ -280,9 +433,12 @@ describe("Tickets Domain", () => {
         clientId: "client-123",
         description: "Detailed description",
         priority: "High",
-        requesterEmail: "user@example.com",
-        techGroupName: "Support Team",
-        categoryName: "Hardware",
+        siteId: "site-9",
+        requesterId: "user-7",
+        techGroupId: "group-4",
+        technicianId: "tech-2",
+        category: "Hardware",
+        subcategory: "Printer",
       });
 
       expect(mockClient.mutate).toHaveBeenCalledWith(
@@ -290,34 +446,32 @@ describe("Tickets Domain", () => {
         expect.objectContaining({
           input: expect.objectContaining({
             description: "Detailed description",
-            priority: "HIGH",
-            requester: { email: "user@example.com" },
-            techGroup: { name: "Support Team" },
-            category: { name: "Hardware" },
+            priority: "High",
+            site: { id: "site-9" },
+            requester: { userId: "user-7" },
+            techGroup: { groupId: "group-4" },
+            technician: { userId: "tech-2" },
+            category: "Hardware",
+            subcategory: "Printer",
           }),
         })
       );
     });
 
-    it("converts priority to uppercase", async () => {
-      const mockResponse = {
-        createTicket: { ticketId: "new-ticket" },
-      };
-      mockClient.mutate.mockResolvedValue(mockResponse);
+    it("passes priority through verbatim (it is a String, not an enum)", async () => {
+      mockClient.mutate.mockResolvedValue({ createTicket: { ticketId: "new-ticket" } });
 
       const domain = getTicketsTools();
       await domain.handleCall("superops_tickets_create", {
         subject: "Issue",
         clientId: "client-123",
-        priority: "critical",
+        priority: "Critical",
       });
 
       expect(mockClient.mutate).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
-          input: expect.objectContaining({
-            priority: "CRITICAL",
-          }),
+          input: expect.objectContaining({ priority: "Critical" }),
         })
       );
     });
@@ -332,15 +486,17 @@ describe("Tickets Domain", () => {
       expect(tool?.inputSchema.properties).toHaveProperty("ticketId");
       expect(tool?.inputSchema.properties).toHaveProperty("status");
       expect(tool?.inputSchema.properties).toHaveProperty("priority");
-      expect(tool?.inputSchema.properties).toHaveProperty("assigneeId");
+      expect(tool?.inputSchema.properties).toHaveProperty("technicianId");
+      expect(tool?.inputSchema.properties).toHaveProperty("techGroupId");
+      expect(tool?.inputSchema.properties).toHaveProperty("resolutionCode");
+      expect(tool?.inputSchema.properties).not.toHaveProperty("assigneeId");
       expect(tool?.inputSchema.required).toContain("ticketId");
     });
 
     it("calls mutate with ticketId only", async () => {
-      const mockResponse = {
+      mockClient.mutate.mockResolvedValue({
         updateTicket: { ticketId: "ticket-123", status: "Open" },
-      };
-      mockClient.mutate.mockResolvedValue(mockResponse);
+      });
 
       const domain = getTicketsTools();
       await domain.handleCall("superops_tickets_update", { ticketId: "ticket-123" });
@@ -354,30 +510,29 @@ describe("Tickets Domain", () => {
     });
 
     it("includes update fields when provided", async () => {
-      const mockResponse = {
-        updateTicket: { ticketId: "ticket-123" },
-      };
-      mockClient.mutate.mockResolvedValue(mockResponse);
+      mockClient.mutate.mockResolvedValue({ updateTicket: { ticketId: "ticket-123" } });
 
       const domain = getTicketsTools();
       await domain.handleCall("superops_tickets_update", {
         ticketId: "ticket-123",
         status: "Resolved",
         priority: "Low",
-        assigneeId: "tech-456",
-        resolution: "Fixed the issue",
+        technicianId: "tech-456",
+        techGroupId: "group-1",
+        resolutionCode: "Fixed",
       });
 
       expect(mockClient.mutate).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
-          input: expect.objectContaining({
+          input: {
             ticketId: "ticket-123",
             status: "Resolved",
-            priority: "LOW",
-            assignee: { id: "tech-456" },
-            resolution: "Fixed the issue",
-          }),
+            priority: "Low",
+            technician: { userId: "tech-456" },
+            techGroup: { groupId: "group-1" },
+            resolutionCode: "Fixed",
+          },
         })
       );
     });
@@ -396,43 +551,39 @@ describe("Tickets Domain", () => {
       expect(tool?.inputSchema.required).toContain("content");
     });
 
-    it("adds internal note by default", async () => {
-      const mockResponse = {
-        addTicketNote: {
+    it("adds a PRIVATE note by default", async () => {
+      mockClient.mutate.mockResolvedValue({
+        createTicketNote: {
           noteId: "note-123",
           content: "Test note",
-          isPublic: false,
+          addedOn: "2026-01-01T00:00:00Z",
+          privacyType: "PRIVATE",
         },
-      };
-      mockClient.mutate.mockResolvedValue(mockResponse);
+      });
 
       const domain = getTicketsTools();
-      await domain.handleCall("superops_tickets_add_note", {
+      const result = await domain.handleCall("superops_tickets_add_note", {
         ticketId: "ticket-123",
         content: "Test note",
       });
 
       expect(mockClient.mutate).toHaveBeenCalledWith(
-        expect.stringContaining("addTicketNote"),
+        expect.stringContaining("createTicketNote"),
         expect.objectContaining({
-          input: expect.objectContaining({
-            ticketId: "ticket-123",
+          input: {
+            ticket: { ticketId: "ticket-123" },
             content: "Test note",
-            isPublic: false,
-          }),
+            privacyType: "PRIVATE",
+          },
         })
       );
+      expect(result.content[0].text).toContain("note-123");
     });
 
-    it("adds public note when specified", async () => {
-      const mockResponse = {
-        addTicketNote: {
-          noteId: "note-123",
-          content: "Public note",
-          isPublic: true,
-        },
-      };
-      mockClient.mutate.mockResolvedValue(mockResponse);
+    it("maps isPublic to the PUBLIC privacy type", async () => {
+      mockClient.mutate.mockResolvedValue({
+        createTicketNote: { noteId: "note-123", privacyType: "PUBLIC" },
+      });
 
       const domain = getTicketsTools();
       await domain.handleCall("superops_tickets_add_note", {
@@ -444,11 +595,27 @@ describe("Tickets Domain", () => {
       expect(mockClient.mutate).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
-          input: expect.objectContaining({
-            isPublic: true,
-          }),
+          input: expect.objectContaining({ privacyType: "PUBLIC" }),
         })
       );
+    });
+
+    it("never sends the invented isPublic field to the API", async () => {
+      mockClient.mutate.mockResolvedValue({ createTicketNote: { noteId: "note-123" } });
+
+      const domain = getTicketsTools();
+      await domain.handleCall("superops_tickets_add_note", {
+        ticketId: "ticket-123",
+        content: "Test note",
+        isPublic: true,
+      });
+
+      const [, variables] = mockClient.mutate.mock.calls[0] as [
+        string,
+        { input: Record<string, unknown> },
+      ];
+      expect(variables.input).not.toHaveProperty("isPublic");
+      expect(variables.input).not.toHaveProperty("ticketId");
     });
   });
 
@@ -459,70 +626,111 @@ describe("Tickets Domain", () => {
 
       expect(tool).toBeDefined();
       expect(tool?.inputSchema.properties).toHaveProperty("ticketId");
-      expect(tool?.inputSchema.properties).toHaveProperty("duration");
-      expect(tool?.inputSchema.properties).toHaveProperty("description");
-      expect(tool?.inputSchema.properties).toHaveProperty("workType");
+      expect(tool?.inputSchema.properties).toHaveProperty("qty");
+      expect(tool?.inputSchema.properties).toHaveProperty("billDateTime");
+      expect(tool?.inputSchema.properties).toHaveProperty("notes");
       expect(tool?.inputSchema.properties).toHaveProperty("billable");
+      expect(tool?.inputSchema.properties).toHaveProperty("afterHours");
+      expect(tool?.inputSchema.properties).toHaveProperty("technicianId");
+      expect(tool?.inputSchema.properties).not.toHaveProperty("duration");
+      expect(tool?.inputSchema.properties).not.toHaveProperty("workType");
       expect(tool?.inputSchema.required).toContain("ticketId");
-      expect(tool?.inputSchema.required).toContain("duration");
+      expect(tool?.inputSchema.required).toContain("qty");
     });
 
-    it("logs time with required fields and default billable", async () => {
-      const mockResponse = {
-        addTicketTimeEntry: {
-          timeEntryId: "time-123",
-          ticketId: "ticket-123",
-          duration: 30,
-        },
-      };
-      mockClient.mutate.mockResolvedValue(mockResponse);
+    it("sends a list containing one worklog entry for the ticket", async () => {
+      mockClient.mutate.mockResolvedValue({
+        createWorklogEntries: [{ itemId: "time-123", qty: "0.5" }],
+      });
 
       const domain = getTicketsTools();
-      await domain.handleCall("superops_tickets_log_time", {
+      const result = await domain.handleCall("superops_tickets_log_time", {
         ticketId: "ticket-123",
-        duration: 30,
+        qty: "0.5",
       });
 
       expect(mockClient.mutate).toHaveBeenCalledWith(
-        expect.stringContaining("addTicketTimeEntry"),
+        expect.stringContaining("createWorklogEntries"),
         expect.objectContaining({
-          input: expect.objectContaining({
-            ticketId: "ticket-123",
-            duration: 30,
-            billable: true,
-          }),
+          input: [
+            expect.objectContaining({
+              workItem: { workId: "ticket-123", module: "TICKET" },
+              qty: "0.5",
+              billable: true,
+              afterHours: false,
+            }),
+          ],
         })
       );
+      expect(result.content[0].text).toContain("time-123");
     });
 
-    it("includes optional fields when provided", async () => {
-      const mockResponse = {
-        addTicketTimeEntry: {
-          timeEntryId: "time-123",
-          duration: 60,
-        },
-      };
-      mockClient.mutate.mockResolvedValue(mockResponse);
+    it("defaults billDateTime to now", async () => {
+      mockClient.mutate.mockResolvedValue({ createWorklogEntries: [{ itemId: "time-123" }] });
 
       const domain = getTicketsTools();
       await domain.handleCall("superops_tickets_log_time", {
         ticketId: "ticket-123",
-        duration: 60,
-        description: "Troubleshooting network issue",
-        workType: "Remote Support",
+        qty: "1",
+      });
+
+      const [, variables] = mockClient.mutate.mock.calls[0] as [
+        string,
+        { input: { billDateTime: string }[] },
+      ];
+      expect(Number.isNaN(Date.parse(variables.input[0].billDateTime))).toBe(false);
+    });
+
+    it("includes optional fields when provided", async () => {
+      mockClient.mutate.mockResolvedValue({ createWorklogEntries: [{ itemId: "time-123" }] });
+
+      const domain = getTicketsTools();
+      await domain.handleCall("superops_tickets_log_time", {
+        ticketId: "ticket-123",
+        qty: "1.5",
+        billDateTime: "2026-01-02T10:00:00Z",
+        notes: "Troubleshooting network issue",
         billable: false,
+        afterHours: true,
+        technicianId: "tech-456",
+        serviceItemId: "item-9",
+        unitPrice: "120",
       });
 
       expect(mockClient.mutate).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
-          input: expect.objectContaining({
-            description: "Troubleshooting network issue",
-            workType: "Remote Support",
-            billable: false,
-          }),
+          input: [
+            {
+              workItem: { workId: "ticket-123", module: "TICKET" },
+              qty: "1.5",
+              billDateTime: "2026-01-02T10:00:00Z",
+              billable: false,
+              afterHours: true,
+              notes: "Troubleshooting network issue",
+              technician: { userId: "tech-456" },
+              serviceItem: { itemId: "item-9" },
+              unitPrice: "120",
+            },
+          ],
         })
       );
+    });
+
+    it("coerces a numeric qty to the String the schema requires", async () => {
+      mockClient.mutate.mockResolvedValue({ createWorklogEntries: [{ itemId: "time-123" }] });
+
+      const domain = getTicketsTools();
+      await domain.handleCall("superops_tickets_log_time", {
+        ticketId: "ticket-123",
+        qty: 2,
+      });
+
+      const [, variables] = mockClient.mutate.mock.calls[0] as [
+        string,
+        { input: { qty: unknown }[] },
+      ];
+      expect(variables.input[0].qty).toBe("2");
     });
   });
 

@@ -96,7 +96,7 @@ Add to your `claude_desktop_config.json`:
 
 - `superops_clients_list` - List clients with filters
 - `superops_clients_get` - Get client details
-- `superops_clients_search` - Search clients by name/domain
+- `superops_clients_search` - Search clients by name
 
 ### Tickets Domain
 
@@ -143,6 +143,31 @@ Here are the open high priority tickets...
 ## Rate Limits
 
 SuperOps.ai API has a rate limit of 800 requests per minute per API token.
+
+## Pagination
+
+SuperOps uses page-based pagination, not cursors. List tools take `page`
+(1-indexed, default 1) and `pageSize` (default 50, max 100), and return a
+`listInfo` block with `page`, `pageSize`, `totalCount` and `hasMore`.
+
+The API also accepts only **one** filter condition per request, so tools that
+previously implied multi-field filtering now document which single attribute
+they match. Use `superops_custom_query` when you need different filter
+semantics.
+
+## Schema conformance
+
+`schema/superops.graphql` is a vendored copy of the SuperOps GraphQL schema,
+generated from their published API reference:
+
+```bash
+node scripts/fetch-schema.mjs
+```
+
+`src/domains/graphql-schema.test.ts` validates every GraphQL document in `src/`
+against it on each `npm test`, so a query referencing a field SuperOps does not
+define fails in CI rather than at runtime. Regenerate the schema after a
+SuperOps API change and re-run the tests.
 
 ## License
 

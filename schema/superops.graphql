@@ -1,0 +1,2300 @@
+# SuperOps.ai GraphQL schema — GENERATED, do not edit by hand.
+#
+# Source: https://developer.superops.com/msp
+# Regenerate with: node scripts/fetch-schema.mjs
+#
+# SuperOps does not expose introspection publicly, so this is scraped from the
+# published API reference. It exists so the test suite can validate every query
+# this server sends offline, without live credentials.
+
+scalar JSON
+
+type Alert {
+  id: ID
+  message: String
+  createdTime: String
+  status: String
+  severity: String
+  description: String
+  asset: JSON
+  policy: JSON
+  resolvedTime: String
+  occurrenceCount: Int
+}
+
+type AlertList {
+  alerts: [Alert]
+  listInfo: ListInfo
+}
+
+enum ArticleStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum ArticleType {
+  HTML
+  PDF
+}
+
+type Asset {
+  assetId: ID
+  name: String!
+  assetClass: JSON!
+  client: JSON!
+  site: JSON!
+  requester: JSON!
+  primaryMac: String
+  loggedInUser: String
+  serialNumber: String
+  manufacturer: String
+  model: String
+  hostName: String
+  publicIp: String
+  gateway: String
+  platform: String
+  domain: String
+  status: String
+  sysUptime: String
+  lastCommunicatedTime: String
+  agentVersion: String
+  platformFamily: String
+  platformCategory: String
+  platformVersion: String
+  patchStatus: String
+  warrantyExpiryDate: String
+  purchasedDate: String
+  customFields: JSON
+  fields: [String]
+  lastReportedTime: String
+  deviceCategory: JSON
+}
+
+type AssetActivityData {
+  activityId: ID
+  module: String
+  activityType: String
+  activityData: JSON
+  createdBy: JSON
+  createdTime: String
+}
+
+type AssetActivityList {
+  activities: [AssetActivityData]
+  listInfo: ListInfo
+}
+
+type AssetCPU {
+  assetId: ID!
+  cpuName: String
+  currentSpeed: JSON
+  maxSpeed: JSON
+  physicalCore: Int
+  logicalCore: Int
+  architecture: String
+  l1Cache: JSON
+  l2Cache: JSON
+  l3Cache: JSON
+  processCount: String
+  threadsCount: String
+  handlesCount: String
+  cpuUsage: JSON
+}
+
+input AssetDetailsListInput {
+  assetId: ID!
+  listInfo: ListInfoInput
+}
+
+type AssetDisk {
+  drive: String
+  discType: String
+  fileSystem: String
+  maxFileLength: Int
+  autoMounted: Boolean
+  compressed: Boolean
+  pageFile: Boolean
+  indexed: Boolean
+  size: JSON
+  freeSize: JSON
+  activeTime: JSON
+  responseTime: JSON
+  readSpeed: JSON
+  writeSpeed: JSON
+  driveUsage: JSON
+}
+
+input AssetIdentifierInput {
+  assetId: ID!
+}
+
+type AssetInterface {
+  name: String
+  mac: String
+  ipv4Address: String
+  ipv6Address: String
+  infIndex: Int
+  mtu: String
+  connectType: String
+  lineSpeed: JSON
+  dataInPerSec: JSON
+  dataOutPerSec: JSON
+  adapterName: String
+}
+
+type AssetList {
+  assets: [Asset]
+  listInfo: ListInfo
+}
+
+type AssetMemory {
+  totalMemory: JSON
+  usedMemory: JSON
+  availableMemory: JSON
+  cachedMemory: JSON
+  pagedPoolByte: JSON
+  nonPagedPoolByte: JSON
+  memoryUsage: JSON
+  swapTotalMemory: JSON
+  swapAvailableMemory: JSON
+  swapUsedMemory: JSON
+}
+
+type AssetPatchList {
+  assetPatches: [PatchData]
+  listInfo: ListInfo
+}
+
+type AssetSoftware {
+  id: ID
+  software: JSON
+  version: String
+  installedDate: String
+  bitVersion: String
+  installedPath: String
+}
+
+type AssetSoftwareList {
+  assetSoftwares: [AssetSoftware]
+  listInfo: ListInfo
+}
+
+type AssetSummary {
+  cpu: AssetCPU
+  memory: AssetMemory
+  disk: Disks
+  assetInterface: AssetInterface
+  lastUserLog: AssetUserLog
+}
+
+type AssetUserLog {
+  id: ID
+  name: String
+  lastLoginTime: String
+}
+
+input AssignDeviceCategoryInput {
+  assetIds: [ID!]!
+  deviceCategoryId: ID!
+}
+
+type Attachment {
+  fileName: String!
+  originalFileName: String!
+  fileSize: String!
+}
+
+enum BLOCK_ITEM_USAGE_TYPE {
+  ALL_HOURS
+  BUSINESS_HOURS
+}
+
+type BillableContract {
+  contractId: ID!
+  chargeItem: JSON!
+  quantityCalculationType: ContractQuantityCalculationType!
+  sellingPriceCalculationType: ContractSellingPriceCalculationType!
+  provisionRule: JSON
+  sellingPriceOverridden: Boolean
+  sellingPrice: PricingModel
+  discountRate: String
+  frequencyType: ContractFrequencyType!
+  includedItems: [JSON!]
+  billableSiteType: BillableSiteType!
+  sites: [JSON!]
+  recurringContract: RecurringContract
+  redeemableContract: RedeemableContract
+  perpetualContract: PerpetualContract
+  changes: [BillableContractQuantityChange!]
+  project: JSON
+  blockItemsInfo: [BlockItemInfo]
+}
+
+type BillableContractQuantityChange {
+  changeId: ID!
+  effectiveDate: String
+  endDate: String
+  quantity: String
+  quantityChangeOperation: BillableContractQuantityChangeOperation!
+}
+
+input BillableContractQuantityChangeInput {
+  changeId: ID
+  effectiveDate: String
+  quantity: String
+  quantityChangeOperation: BillableContractQuantityChangeOperation
+}
+
+enum BillableContractQuantityChangeOperation {
+  INCREASE
+  DECREASE
+  BASELINE
+}
+
+enum BillableSiteType {
+  HQ
+  ALL
+  INCLUDED
+}
+
+type BlockItemInfo {
+  blockItemId: ID
+  balance: String
+}
+
+type BusinessFunction {
+  businessFunctionId: ID!
+  name: String!
+}
+
+input BusinessFunctionIdentifierInput {
+  businessFunctionId: ID!
+}
+
+type BusinessHour {
+  day: DayOfWeek!
+  start: String!
+  end: String!
+}
+
+type Category {
+  id: ID!
+  name: String!
+  subCategories: [SubCategory]
+}
+
+type Cause {
+  id: ID!
+  name: String!
+  subCauses: [SubCause]
+}
+
+type Client {
+  accountId: ID!
+  name: String!
+  stage: String!
+  status: String
+  emailDomains: [String]
+  accountManager: JSON
+  primaryContact: JSON
+  secondaryContact: JSON
+  hqSite: JSON
+  technicianGroups: JSON
+  customFields: JSON
+  fields: [String]
+}
+
+type ClientContract {
+  contractId: ID
+  client: JSON!
+  contract: Contract!
+  startDate: String!
+  endDate: String
+  contractStatus: ClientContractStatus!
+}
+
+type ClientContractList {
+  clientContracts: [ClientContract!]
+  listInfo: ListInfo
+}
+
+enum ClientContractStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+}
+
+input ClientIdentifierInput {
+  accountId: ID!
+}
+
+type ClientList {
+  clients: [Client]
+  listInfo: ListInfo
+}
+
+enum ClientSharedType {
+  AllClients
+  Client
+}
+
+type ClientSite {
+  id: ID!
+  name: String!
+  businessHour: [BusinessHour]
+  holidayList: HolidayList
+  timezoneCode: String!
+  working24x7: Boolean!
+  line1: String
+  line2: String
+  line3: String
+  city: String
+  postalCode: String
+  countryCode: String
+  stateCode: String
+  contactNumber: String
+  client: JSON!
+  hq: Boolean
+  installerInfo: [InstallerDetails]
+}
+
+input ClientSiteIdentifierInput {
+  id: ID!
+}
+
+type ClientSiteList {
+  sites: [ClientSite]
+  listInfo: ListInfo
+}
+
+type ClientStage {
+  stageId: ID!
+  name: String!
+  constant: String
+  statuses: [ClientStatus]
+}
+
+type ClientStatus {
+  statusId: ID!
+  name: String
+  constant: String
+}
+
+type ClientUser {
+  userId: ID!
+  firstName: String!
+  lastName: String
+  name: String!
+  email: String!
+  contactNumber: String
+  reportingManager: JSON
+  site: JSON
+  role: JSON!
+  client: JSON
+  customFields: JSON
+  fields: [String]
+}
+
+type ClientUserAssociation {
+  id: ID!
+  client: Client!
+  site: ClientSite!
+  user: ClientUser!
+}
+
+input ClientUserAssociationIdentifierInput {
+  id: ID!
+}
+
+type ClientUserAssociationList {
+  associations: [ClientUserAssociation]
+  listInfo: ListInfo
+}
+
+input ClientUserIdentifierInput {
+  userId: ID!
+}
+
+type ClientUserList {
+  userList: [ClientUser]
+  listInfo: ListInfo
+}
+
+type Contract {
+  contractId: ID!
+  name: String
+  description: String
+  contractType: ContractType!
+  billableContract: BillableContract
+}
+
+enum ContractFrequencyType {
+  ONCE
+  PERPETUAL
+  RECURRING
+}
+
+input ContractIdentifierInput {
+  contractId: ID!
+}
+
+enum ContractQuantityCalculationType {
+  FIXED
+  DYNAMIC
+}
+
+enum ContractSellingPriceCalculationType {
+  FIXED
+  DYNAMIC
+}
+
+enum ContractType {
+  SERVICE
+  USAGE
+  ONE_TIME
+  TIME_AND_MATERIAL
+}
+
+input CreateAlertInput {
+  assetId: ID!
+  message: String!
+  description: String
+  severity: String
+}
+
+input CreateAttachmentInput {
+  fileName: String!
+  originalFileName: String!
+  fileSize: String!
+}
+
+input CreateBillableContractInput {
+  chargeItem: ServiceCatalogItemIdentifierInput!
+  sellingPriceOverridden: Boolean!
+  sellingPrice: PricingModelInput
+  discountRate: String
+  billableSiteType: BillableSiteType!
+  addSites: [ClientSiteIdentifierInput!]
+  recurringContract: RecurringContractInput!
+  change: BillableContractQuantityChangeInput!
+}
+
+input CreateBusinessHourInput {
+  day: DayOfWeek!
+  start: String!
+  end: String!
+}
+
+input CreateCategoryInput {
+  name: String!
+  addSubCategories: [CreateSubCategoryInput]
+}
+
+input CreateCauseInput {
+  name: String!
+  addSubCauses: [CreateSubCauseInput]
+}
+
+input CreateClientContractInput {
+  client: ClientIdentifierInput!
+  contract: CreateContractInput!
+  startDate: String!
+  endDate: String
+}
+
+input CreateClientInput {
+  name: String!
+  stage: String
+  status: String
+  emailDomains: [String]
+  accountManager: TechnicianIdentifierInput
+  addTechnicianGroups: [TechnicianGroupIdentifierInput]
+  customFields: JSON
+}
+
+input CreateClientInputV2 {
+  name: String!
+  stage: String
+  status: String
+  emailDomains: [String]
+  accountManager: TechnicianIdentifierInput
+  addTechnicianGroups: [TechnicianGroupIdentifierInput]
+  customFields: JSON
+  hqSite: CreateClientSiteInput!
+}
+
+input CreateClientSiteInput {
+  name: String!
+  working24x7: Boolean!
+  businessHour: [CreateBusinessHourInput]
+  holidayList: HolidayListIdentifierInput
+  timezoneCode: String!
+  line1: String
+  line2: String
+  line3: String
+  city: String
+  postalCode: String
+  countryCode: String
+  stateCode: String
+  client: ClientIdentifierInput
+}
+
+input CreateClientUserAssociationInput {
+  client: ClientIdentifierInput!
+  site: ClientSiteIdentifierInput!
+  user: ClientUserIdentifierInput
+}
+
+input CreateClientUserInput {
+  firstName: String!
+  lastName: String
+  email: String!
+  contactNumber: String
+  reportingManager: ClientUserIdentifierInput
+  role: RoleIdentifierInput!
+  addAssociations: [CreateClientUserAssociationInput]
+  customFields: JSON
+}
+
+input CreateContractInput {
+  description: String
+  billableContract: CreateBillableContractInput!
+}
+
+input CreateCustomFieldInput {
+  label: String!
+  description: String
+  fieldType: CustomFieldType!
+  options: [String]
+  showToClient: Boolean!
+}
+
+input CreateDocumentShareInput {
+  added: [NewShareDetailsInput!]!
+}
+
+input CreateFieldInput {
+  label: String!
+  description: String
+  fieldType: FieldType!
+  showToRequester: Boolean
+  module: String!
+  mandatoryOnCreate: Boolean
+  mandatoryOnClosure: Boolean
+  addOptions: [CreateFieldOptionInput]
+  parentField: IdentifierInput
+}
+
+input CreateFieldOptionInput {
+  value: String!
+  description: String
+  order: Int!
+  parentOption: IdentifierInput
+}
+
+input CreateHourlyServiceTypeItemInput {
+  roundUpValue: Int!
+}
+
+input CreateInvoiceInput {
+  client: ClientIdentifierInput!
+  site: ClientSiteIdentifierInput!
+  statusEnum: InvoiceStatus!
+  invoiceDate: String!
+  dueDate: String
+  addItems: [CreateInvoiceItemInput]!
+  additionalDiscount: String
+  additionalDiscountRate: String
+  memo: String
+  title: String
+  footer: String
+  paymentTerm: PaymentTermIdentifierInput
+}
+
+input CreateInvoiceItemInput {
+  billedDate: String!
+  serviceItem: ServiceItemIdentifierInput!
+  details: String
+  quantity: String!
+  unitPrice: String!
+  discountRate: String
+  discountAmount: String
+  taxable: Boolean
+  tax: TaxIdentifierInput
+}
+
+input CreateItDocumentationInput {
+  typeId: ID!
+  name: String!
+  client: ClientIdentifierInput
+  site: ClientSiteIdentifierInput
+  customFields: JSON
+}
+
+input CreateKbArticleInput {
+  name: String!
+  parent: KBItemIdentifierInput!
+  status: ArticleStatus!
+  content: String!
+  visibility: CreateDocumentShareInput!
+  loginRequired: Boolean
+}
+
+input CreateKbCollectionInput {
+  name: String!
+  parent: KBItemIdentifierInput
+}
+
+input CreateNoteInput {
+  workItem: WorkItemIdentifierInput!
+  content: String!
+  addAttachments: [CreateAttachmentInput]
+  addedBy: UserIdentifierInput
+  addedOn: String
+  mentions: [UserIdentifierInput]
+  privacyType: NotePrivacyType
+}
+
+input CreateRedeemableServiceBundleInput {
+  applicableType: RedeemableBundleApplicableType!
+  applicableHours: RedeemableBundleApplicableHours!
+  redeemableQuantity: String!
+}
+
+input CreateServiceCatalogItemInput {
+  name: String!
+  description: String
+  category: ServiceCategoryIdentifierInput
+  itemType: ServiceCatalogItemType!
+  offerAsWorklogItem: Boolean
+  taxable: Boolean!
+  salesTax: TaxIdentifierInput
+  costPrice: PricingModelInput
+  sellingPrice: PricingModelInput
+  serviceTypeItem: CreateServiceTypeItemInput
+}
+
+input CreateServiceCategoryInput {
+  name: String!
+}
+
+input CreateServiceItemInput {
+  name: String!
+  description: String
+  quantityType: ServiceItemQuantityType!
+  category: ServiceCategoryIdentifierInput
+  useAsWorklogItem: Boolean
+  unitPrice: String
+  businessHoursUnitPrice: String
+  afterHoursUnitPrice: String
+  roundUpValue: Int
+  quantity: String
+  amount: String
+  adjustBlockItemAgainstAllItems: Boolean
+  addBlockItemAdjustedItems: [ServiceItemIdentifierInput]
+  blockItemUsedIn: BLOCK_ITEM_USAGE_TYPE
+  salesTaxEnabled: Boolean
+  salesTax: TaxIdentifierInput
+}
+
+input CreateServiceTypeItemInput {
+  offeringType: ServiceTypeItemOfferingType!
+  addBundledItems: [ServiceCatalogItemIdentifierInput!]
+  hourlyServiceTypeItem: CreateHourlyServiceTypeItemInput
+  redeemableServiceBundle: CreateRedeemableServiceBundleInput
+}
+
+input CreateStatusInput {
+  name: String!
+  description: String
+}
+
+input CreateSubCategoryInput {
+  name: String!
+}
+
+input CreateSubCauseInput {
+  name: String!
+  description: String
+}
+
+input CreateTaskInput {
+  title: String!
+  description: String
+  status: String!
+  estimatedTime: Int
+  scheduledStartDate: String
+  dueDate: String
+  technician: TechnicianIdentifierInput
+  techGroup: TechnicianGroupIdentifierInput
+  module: TaskModule!
+  ticket: TicketIdentifierInput
+}
+
+input CreateTaxInput {
+  name: String!
+  addRates: [CreateTaxRateInput]!
+}
+
+input CreateTaxRateInput {
+  name: String!
+  rateValue: String!
+}
+
+input CreateTechnicianInput {
+  firstName: String!
+  lastName: String
+  email: String!
+  contactNumber: String
+  emailSignature: String
+  designation: DesignationIdentifierInput
+  businessFunction: BusinessFunctionIdentifierInput
+  team: TeamIdentifierInput
+  reportingManager: TechnicianIdentifierInput
+  addGroups: [TechnicianGroupIdentifierInput]
+  role: RoleIdentifierInput!
+}
+
+input CreateTicketConversationInput {
+  content: String
+  user: UserIdentifierInput
+  time: String
+  toUsers: [RecipientIdentifierInput]
+  ccUsers: [RecipientIdentifierInput]
+  bccUsers: [RecipientIdentifierInput]
+  attachments: [CreateAttachmentInput]
+  ticket: TicketIdentifierInput!
+  sendMail: Boolean
+}
+
+input CreateTicketInput {
+  subject: String!
+  description: String
+  descriptionAttachments: [CreateAttachmentInput]
+  client: ClientIdentifierInput!
+  site: ClientSiteIdentifierInput
+  requester: ClientUserIdentifierInput
+  techGroup: TechnicianGroupIdentifierInput
+  technician: TechnicianIdentifierInput
+  status: String
+  requestType: String
+  source: TicketSource!
+  priority: String
+  impact: String
+  urgency: String
+  category: String
+  subcategory: String
+  cause: String
+  subcause: String
+  sla: SLAIdentifierInput
+  resolutionCode: String
+  customFields: JSON
+  addAdditionalRequester: [ClientUserIdentifierInput]
+  addFollowers: [TechnicianIdentifierInput]
+  createdTime: String
+  updatedTime: String
+  subSource: String
+  sourceReferenceId: String
+  addAssets: [AssetIdentifierInput]
+  suppressCloseNotification: Boolean
+  firstResponseTime: String
+  resolutionTime: String
+}
+
+input CreateTicketNoteInput {
+  ticket: TicketIdentifierInput!
+  content: String!
+  attachments: [CreateAttachmentInput]
+  addedBy: UserIdentifierInput
+  addedOn: String
+  privacyType: NotePrivacyType
+}
+
+input CreateWorklogEntryInput {
+  serviceItem: ServiceItemIdentifierInput
+  billable: Boolean
+  afterHours: Boolean
+  qty: String!
+  unitPrice: String
+  billDateTime: String!
+  notes: String
+  workItem: WorkItemIdentifierInput!
+  technician: TechnicianIdentifierInput
+}
+
+type CustomField {
+  id: ID!
+  columnName: String!
+  label: String!
+  description: String
+  fieldType: CustomFieldType!
+  showToClient: Boolean!
+}
+
+input CustomFieldIdentifierInput {
+  fieldId: ID!
+}
+
+enum CustomFieldType {
+  TEXT
+  PARAGRAPH
+  NUMERIC
+  DECIMAL
+  DATE
+  DATETIME
+  RADIO
+  CHECKBOX
+  SELECT
+  MULTI_SELECT
+  RICH_TEXT
+  PASSWORD
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+input DeleteKbArticleInput {
+  article: KBItemIdentifierInput!
+}
+
+input DeleteKbCollectionInput {
+  kbCollection: KBItemIdentifierInput!
+}
+
+input DeleteUserInput {
+  userId: ID!
+  forget: Boolean
+}
+
+type Designation {
+  designationId: ID!
+  name: String!
+}
+
+input DesignationIdentifierInput {
+  designationId: ID!
+}
+
+type DeviceCategory {
+  deviceCategoryId: ID!
+  name: String
+  custom: Boolean
+  assetClass: JSON
+  createdTime: String
+}
+
+input DeviceCategoryIdentifierInput {
+  module: [String]
+  custom: Boolean
+  classId: ID
+}
+
+type Disks {
+  disks: [AssetDisk]
+  totalFreeSpace: JSON
+  totalSize: JSON
+}
+
+type DocumentSharedDetails {
+  mappingId: ID!
+  portalType: RoleTypeEnum
+  clientSharedType: ClientSharedType
+  siteSharedType: SiteSharedType
+  userRoleSharedType: UserRoleSharedType
+  client: JSON
+  site: JSON
+  roles: [JSON]
+  userSharedType: UserSharedType
+  groupSharedType: GroupSharedType
+  users: [JSON]
+  groups: [JSON]
+}
+
+input DocumentSharedDetailsInput {
+  mappingId: ID
+  portalType: RoleTypeEnum
+  clientSharedType: ClientSharedType
+  accountId: ID
+  siteSharedType: SiteSharedType
+  siteId: ID
+  userRoleSharedType: UserRoleSharedType
+  addedRoleIds: [ID]
+  deletedRoleIds: [ID]
+  userSharedType: UserSharedType
+  addedUserIds: [ID]
+  deletedUserIds: [ID]
+  groupSharedType: GroupSharedType
+  addedGroupIds: [ID]
+  deletedGroupIds: [ID]
+}
+
+input DocumentSharedUpdateInput {
+  added: [NewShareDetailsInput]
+  updated: [DocumentSharedDetailsInput]
+  deleted: [ID]
+}
+
+type Feature {
+  featureId: ID!
+  name: String!
+  key: String!
+}
+
+type Field {
+  id: ID!
+  module: String!
+  columnName: String!
+  label: String!
+  description: String
+  fieldType: FieldType!
+  options: [Option]
+  showToRequester: Boolean!
+  fieldCategory: FieldCategory
+  mandatoryOnCreate: Boolean
+  mandatoryOnClosure: Boolean
+  parentField: Field
+}
+
+enum FieldCategory {
+  CUSTOM
+  DEFAULT
+}
+
+input FieldIdentifierInput {
+  id: ID
+  columnName: String
+  module: String!
+}
+
+enum FieldType {
+  TEXT
+  PARAGRAPH
+  NUMERIC
+  DECIMAL
+  DATE
+  DATETIME
+  RADIO
+  CHECKBOX
+  SELECT
+  MULTI_SELECT
+  RICH_TEXT
+  PASSWORD
+  SECURE_TEXT
+  URL
+}
+
+enum FrequencyDurationUnit {
+  MONTH
+  DAY
+  WEEK
+  YEAR
+}
+
+input GetClientSiteListInput {
+  listInfo: ListInfoInput
+  clientId: ID
+}
+
+input GetClientUserListInput {
+  listInfo: ListInfoInput
+  clientId: ID
+}
+
+input GetTaskInput {
+  taskId: ID!
+}
+
+input GetTaskListInput {
+  listInfo: ListInfoInput
+}
+
+input GetWorklogEntriesInput {
+  module: WorkModule
+  listInfo: ListInfoInput
+}
+
+enum GroupSharedType {
+  AllGroups
+  Group
+}
+
+type HolidayList {
+  id: ID!
+  name: String!
+}
+
+input HolidayListIdentifierInput {
+  id: ID!
+}
+
+type HourlyServiceTypeItem {
+  itemId: ID!
+  roundUpValue: Int!
+  defaultItem: Boolean!
+}
+
+type ITDocumentationType {
+  typeId: ID
+  name: String
+  description: String
+  entityName: String
+  lastUpdatedTime: String
+  customFields: JSON
+}
+
+input IdentifierInput {
+  id: ID!
+}
+
+type Impact {
+  id: ID!
+  name: String!
+}
+
+type InstallerDetails {
+  id: String
+  installerDownloadUrl: String
+  installerName: String
+  os: String
+}
+
+type Invoice {
+  invoiceId: ID!
+  displayId: String!
+  client: JSON
+  site: JSON
+  invoiceDate: String!
+  dueDate: String
+  statusEnum: InvoiceStatus
+  sentToClient: Boolean
+  items: [InvoiceItem]
+  taxes: [InvoiceTaxItem]
+  discountAmount: String
+  additionalDiscount: String
+  additionalDiscountRate: String
+  totalAmount: String
+  notes: String
+  paymentDate: String
+  paymentMethod: JSON
+  paymentReference: String
+  invoicePaymentTerm: JSON
+}
+
+input InvoiceIdentifierInput {
+  invoiceId: ID!
+}
+
+type InvoiceItem {
+  itemId: ID!
+  billedDate: String!
+  details: String
+  quantity: String!
+  unitPrice: String!
+  discountRate: String
+  amount: String
+  taxable: Boolean
+  tax: JSON
+  serviceItem: JSON
+  taxAmount: String
+  totalAmount: String
+  invoice: Invoice
+}
+
+type InvoiceItemList {
+  items: [InvoiceItem]
+  listInfo: ListInfo
+}
+
+type InvoiceList {
+  invoices: [Invoice]
+  listInfo: ListInfo
+}
+
+enum InvoiceStatus {
+  DRAFT
+  APPROVED
+  PAID
+  OVERDUE
+  VOID
+}
+
+type InvoiceTaxItem {
+  tax: JSON!
+  taxRate: String!
+  taxableAmount: String!
+  taxAmount: String!
+  id: ID!
+  rate: JSON!
+}
+
+type ItDocumentation {
+  itDocId: ID!
+  name: String
+  client: JSON
+  site: JSON
+  customFields: JSON
+  fields: [String]
+}
+
+input ItDocumentationIdentifierInput {
+  itDocId: ID!
+}
+
+type ItDocumentationList {
+  documents: [ItDocumentation]
+  listInfo: ListInfo
+}
+
+input ItDocumentationListInput {
+  typeId: ID
+  listInfo: ListInfoInput
+}
+
+input KBItemIdentifierInput {
+  itemId: ID!
+}
+
+type KbArticle {
+  itemId: ID
+  name: String
+  parent: KbCollection
+  description: String
+  status: ArticleStatus
+  createdBy: JSON
+  createdOn: String
+  lastModifiedBy: JSON
+  lastModifiedOn: String
+  viewCount: Int
+  articleType: ArticleType
+  visibility: [DocumentSharedDetails]
+  loginRequired: Boolean
+}
+
+type KbCollection {
+  itemId: ID!
+  name: String!
+  parent: KbCollection
+}
+
+type KbItem {
+  itemId: ID
+  name: String
+  parent: KbCollection
+  itemType: KbItemType
+  description: String
+  status: ArticleStatus
+  createdBy: JSON
+  createdOn: String
+  lastModifiedBy: JSON
+  lastModifiedOn: String
+  viewCount: Int
+  articleType: ArticleType
+  visibility: [DocumentSharedDetails]
+  loginRequired: Boolean
+}
+
+type KbItemList {
+  items: [KbItem]
+  listInfo: ListInfo
+}
+
+enum KbItemType {
+  KB_COLLECTION
+  KB_ARTICLE
+}
+
+type ListInfo {
+  page: Int
+  pageSize: Int
+  sort: [Sort]
+  condition: JSON
+  hasMore: Boolean
+  totalCount: Int
+}
+
+input ListInfoInput {
+  page: Int
+  pageSize: Int
+  condition: RuleConditionInput
+  sort: [SortInput]
+}
+
+input NewShareDetailsInput {
+  portalType: RoleTypeEnum
+  clientSharedType: ClientSharedType
+  accountId: ID
+  siteSharedType: SiteSharedType
+  siteId: ID
+  userRoleSharedType: UserRoleSharedType
+  addedRoleIds: [ID]
+  userSharedType: UserSharedType
+  addedUserIds: [ID]
+  groupSharedType: GroupSharedType
+  addedGroupIds: [ID]
+}
+
+type Note {
+  noteId: ID!
+  addedBy: JSON
+  addedOn: String!
+  content: String!
+  attachments: [Attachment]
+  privacyType: NotePrivacyType
+}
+
+enum NotePrivacyType {
+  PUBLIC
+  PRIVATE
+}
+
+type OfferedItem {
+  itemId: ID!
+  type: OfferedItemType!
+  billDate: String!
+  status: OfferedItemAuditStatus!
+  serviceItem: JSON!
+  client: JSON
+  site: JSON
+  workItem: JSON
+  technician: JSON
+  afterHours: Boolean
+  unitPrice: String
+  qty: String
+  discountRate: String
+  amount: String
+  revisedUnitPrice: String
+  revisedQuantity: String
+  revisedDiscountRate: String
+  revisedAmount: String
+  adjustedBlockMoney: String
+  adjustedBlockHour: String
+  notes: String
+  createdTime: String
+  updatedTime: String
+}
+
+enum OfferedItemAuditStatus {
+  PENDING
+  APPROVED
+  IGNORED
+  INVOICED
+  UNDER_CONTRACT
+}
+
+type OfferedItemList {
+  items: [OfferedItem]
+  listInfo: ListInfo
+}
+
+enum OfferedItemType {
+  CONTRACT
+  WORK
+}
+
+type Operation {
+  operationId: ID!
+  name: String!
+}
+
+type Option {
+  id: ID!
+  value: String
+  description: String
+  details: JSON
+  order: Int!
+  parentOption: Option
+  deletable: Boolean!
+}
+
+type PatchData {
+  patchDetail: PatchDetails
+  approvalStatus: String
+  installationTime: String
+  installationStatus: String
+  failedMessage: String
+}
+
+type PatchDetails {
+  patchId: ID!
+  patchKey: String
+  title: String
+  publishedDate: String
+  category: String
+  severity: String
+  kbNumbers: [PatchKb]
+  restartRequired: Boolean
+}
+
+type PatchKb {
+  kbNumber: String
+}
+
+type PaymentMethod {
+  paymentMethodId: ID!
+  paymentMethodName: String!
+}
+
+input PaymentMethodIdentifierInput {
+  paymentMethodId: ID!
+}
+
+type PaymentTerm {
+  paymentTermId: ID!
+  paymentTermName: String!
+  paymentTermValue: Int
+}
+
+input PaymentTermIdentifierInput {
+  paymentTermId: ID!
+}
+
+type PerpetualContract {
+  contractId: ID!
+  autoRenew: Boolean!
+}
+
+type PricingModel {
+  model: PricingModelType!
+  details: [PricingModelDetail!]!
+}
+
+type PricingModelDetail {
+  value: String!
+  afterHoursValue: String
+}
+
+input PricingModelDetailsInput {
+  value: String!
+  afterHoursValue: String
+}
+
+input PricingModelInput {
+  model: PricingModelType!
+  details: [PricingModelDetailsInput!]!
+}
+
+enum PricingModelType {
+  PER_UNIT
+}
+
+type Priority {
+  id: ID!
+  name: String!
+  colorCode: String
+}
+
+input RecipientIdentifierInput {
+  email: String!
+}
+
+type RecipientInfo {
+  user: JSON!
+}
+
+type RecurringContract {
+  contractId: ID!
+  recurringMode: RecurringMode!
+  frequencyDurationUnit: FrequencyDurationUnit!
+  frequencyInterval: Int!
+  billingOffset: Int!
+  nextBillDate: String
+}
+
+input RecurringContractInput {
+  recurringMode: RecurringMode!
+  frequencyDurationUnit: FrequencyDurationUnit!
+  frequencyInterval: Int!
+  billingOffset: Int
+}
+
+enum RecurringMode {
+  ARREAR
+  UPFRONT
+  ADVANCE
+}
+
+enum RedeemableBundleApplicableHours {
+  BUSINESS_HOURS
+  AFTER_HOURS
+  ALL_HOURS
+}
+
+enum RedeemableBundleApplicableType {
+  ALL_ITEMS
+  INCLUDED_ITEMS
+}
+
+type RedeemableContract {
+  contractId: ID!
+  applicableType: RedeemableBundleApplicableType!
+  applicableHours: RedeemableBundleApplicableHours!
+  carryForwardRemainingQuantity: Boolean!
+}
+
+type RedeemableServiceBundle {
+  itemId: ID!
+  applicableType: RedeemableBundleApplicableType!
+  applicableHours: RedeemableBundleApplicableHours!
+  redeemableQuantity: String!
+}
+
+type ResolutionCode {
+  id: ID!
+  name: String!
+  description: String
+}
+
+input ResolveAlertInput {
+  id: ID!
+}
+
+type Role {
+  roleId: ID!
+  name: String!
+  description: String
+  roleType: RoleType
+  roleFeatureList: [RoleFeature]
+  roleUserList: JSON
+}
+
+type RoleFeature {
+  feature: Feature!
+  operationList: [Operation]!
+}
+
+input RoleIdentifierInput {
+  roleId: ID!
+}
+
+type RoleType {
+  roleTypeId: ID!
+  name: String!
+}
+
+enum RoleTypeEnum {
+  TECHNICIAN
+  REQUESTER
+}
+
+input RuleConditionInput {
+  attribute: String
+  operator: String
+  value: JSON
+}
+
+type RunScriptData {
+  actionConfigId: ID
+  script: JSON
+  scriptArguments: JSON
+  addedBy: JSON
+}
+
+input RunScriptInput {
+  assetId: ID!
+  scriptId: ID!
+  scriptArguments: JSON
+}
+
+type SLA {
+  id: ID!
+  name: String!
+}
+
+input SLAIdentifierInput {
+  id: ID!
+}
+
+type Script {
+  scriptId: ID!
+  name: String
+  description: String
+  language: String
+  addedBy: JSON
+  createdTime: String
+  favourite: Boolean
+  runAs: String
+  runTimeVariables: [String]
+  timeOut: Int
+  tags: JSON
+  readMe: String
+}
+
+type ScriptList {
+  scripts: [Script]
+  listInfo: ListInfo
+}
+
+input ScriptListByTypeInput {
+  type: String!
+  listInfo: ListInfoInput
+}
+
+type ServiceCatalogItem {
+  itemId: ID!
+  name: String!
+  description: String
+  category: ServiceCategory
+  itemType: ServiceCatalogItemType!
+  offerAsWorklogItem: Boolean
+  status: ServiceCatalogItemStatus
+  taxable: Boolean
+  salesTax: Tax
+  sellingPrice: PricingModel
+  costPrice: PricingModel
+  serviceTypeItem: ServiceTypeItem
+}
+
+input ServiceCatalogItemIdentifierInput {
+  itemId: ID!
+}
+
+type ServiceCatalogItemList {
+  items: [ServiceCatalogItem]
+  listInfo: ListInfo
+}
+
+enum ServiceCatalogItemStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ServiceCatalogItemType {
+  PRODUCT
+  SERVICE
+}
+
+type ServiceCategory {
+  categoryId: ID!
+  name: String!
+}
+
+input ServiceCategoryIdentifierInput {
+  categoryId: ID!
+}
+
+type ServiceItem {
+  itemId: ID!
+  name: String!
+  description: String
+  quantityType: ServiceItemQuantityType!
+  category: ServiceCategory
+  useAsWorklogItem: Boolean
+  unitPrice: String
+  businessHoursUnitPrice: String
+  afterHoursUnitPrice: String
+  roundUpValue: Int
+  quantity: String
+  amount: String
+  adjustBlockItemAgainstAllItems: Boolean
+  blockItemAdjustedItems: [ServiceItem]
+  blockItemUsedIn: BLOCK_ITEM_USAGE_TYPE
+  salesTaxEnabled: Boolean
+  salesTax: Tax
+}
+
+input ServiceItemIdentifierInput {
+  itemId: ID!
+}
+
+type ServiceItemList {
+  items: [ServiceItem]
+  listInfo: ListInfo
+}
+
+enum ServiceItemQuantityType {
+  UNITS
+  HOURS
+  BLOCK_HOURS
+  BLOCK_MONEY
+}
+
+type ServiceTypeItem {
+  itemId: ID!
+  offeringType: ServiceTypeItemOfferingType!
+  bundledItems: [ServiceCatalogItem!]
+  hourlyServiceTypeItem: HourlyServiceTypeItem
+  redeemableServiceBundle: RedeemableServiceBundle
+}
+
+enum ServiceTypeItemOfferingType {
+  QUANTITY
+  HOURS
+  BLOCK_HOUR
+  BLOCK_MONEY
+  SERVICE_BUNDLE
+}
+
+enum SiteSharedType {
+  AllSites
+  Site
+}
+
+type Sort {
+  attribute: String
+  order: SortOrder
+}
+
+input SortInput {
+  attribute: String
+  order: SortOrder
+}
+
+enum SortOrder {
+  ASC
+  DESC
+}
+
+type Status {
+  id: ID!
+  name: String!
+  description: String
+}
+
+type SubCategory {
+  id: ID!
+  name: String!
+}
+
+type SubCause {
+  id: ID!
+  name: String!
+  description: String
+}
+
+input TPAssetInfoInput {
+  tpEndpointIds: [String!]
+  integrationRefId: ID!
+}
+
+type TPEndpointAssetInfo {
+  tpEndpointId: String
+  superOpsAssetInfo: Asset
+}
+
+type Task {
+  taskId: ID!
+  displayId: ID!
+  title: String!
+  description: String
+  status: String!
+  estimatedTime: Int
+  scheduledStartDate: String
+  dueDate: String
+  overdue: Boolean
+  actualStartDate: String
+  actualEndDate: String
+  technician: JSON
+  techGroup: JSON
+  module: TaskModule
+  ticket: JSON
+  workItem: JSON
+}
+
+type TaskList {
+  tasks: [Task]
+  listInfo: ListInfo
+}
+
+enum TaskModule {
+  TICKET
+}
+
+type Tax {
+  taxId: ID!
+  name: String!
+  rates: [TaxRate]
+  totalRate: String
+}
+
+input TaxIdentifierInput {
+  taxId: ID!
+}
+
+type TaxList {
+  taxes: [Tax]
+  listInfo: ListInfo
+}
+
+type TaxRate {
+  rateId: ID!
+  name: String!
+  rateValue: String!
+}
+
+type Team {
+  teamId: ID!
+  name: String!
+}
+
+input TeamIdentifierInput {
+  teamId: ID!
+}
+
+type Technician {
+  userId: ID!
+  firstName: String!
+  lastName: String
+  name: String!
+  email: String!
+  contactNumber: String
+  emailSignature: String
+  designation: JSON
+  businessFunction: JSON
+  team: JSON
+  reportingManager: JSON
+  role: JSON
+  groups: JSON
+}
+
+type TechnicianGroup {
+  groupId: ID!
+  name: String!
+}
+
+input TechnicianGroupIdentifierInput {
+  groupId: ID!
+}
+
+input TechnicianIdentifierInput {
+  userId: ID!
+}
+
+type TechnicianList {
+  userList: [Technician]
+  listInfo: ListInfo
+}
+
+type Ticket {
+  ticketId: ID!
+  displayId: String!
+  subject: String!
+  ticketType: TicketType
+  requestType: String
+  source: TicketSource!
+  client: JSON
+  site: JSON
+  requester: JSON
+  additionalRequester: JSON
+  followers: JSON
+  techGroup: JSON
+  technician: JSON
+  status: String
+  priority: String
+  impact: String
+  urgency: String
+  category: String
+  subcategory: String
+  cause: String
+  subcause: String
+  resolutionCode: String
+  sla: JSON
+  createdTime: String
+  updatedTime: String
+  firstResponseDueTime: String
+  firstResponseTime: String
+  firstResponseViolated: Boolean
+  resolutionDueTime: String
+  resolutionTime: String
+  resolutionViolated: Boolean
+  customFields: JSON
+  fields: [String]
+  worklogTimespent: String
+}
+
+type TicketConversation {
+  conversationId: ID!
+  content: String
+  time: String!
+  user: JSON
+  toUsers: [RecipientInfo]
+  ccUsers: [RecipientInfo]
+  bccUsers: [RecipientInfo]
+  attachments: [Attachment]
+  type: TicketConversationType!
+}
+
+enum TicketConversationType {
+  DESCRIPTION
+  REQ_REPLY
+  REQ_NOTIFICATION
+  TECH_REPLY
+  TECH_NOTIFICATION
+}
+
+input TicketIdentifierInput {
+  ticketId: ID!
+}
+
+type TicketList {
+  tickets: [Ticket]
+  listInfo: ListInfo
+}
+
+enum TicketSource {
+  FORM
+  AGENT
+  EMAIL
+  AI
+  PHONE
+  INTEGRATION
+}
+
+enum TicketType {
+  INCIDENT
+  SERVICE_REQUEST
+}
+
+input UpdateAssetInput {
+  assetId: ID!
+  name: String
+  client: ClientIdentifierInput
+  site: ClientSiteIdentifierInput
+  customFields: JSON
+  requester: ClientUserIdentifierInput
+  warrantyExpiryDate: String
+  purchasedDate: String
+}
+
+input UpdateBillableContractInput {
+  sellingPriceOverridden: Boolean
+  sellingPrice: PricingModelInput
+  change: BillableContractQuantityChangeInput
+}
+
+input UpdateClientContractInput {
+  contract: UpdateContractInput!
+  endDate: String
+}
+
+input UpdateClientInput {
+  accountId: ID!
+  name: String
+  stage: String
+  status: String
+  emailDomains: [String]
+  accountManager: TechnicianIdentifierInput
+  primaryContact: ClientUserIdentifierInput
+  secondaryContact: ClientUserIdentifierInput
+  hqSite: ClientSiteIdentifierInput
+  addTechnicianGroups: [TechnicianGroupIdentifierInput]
+  deleteTechnicianGroups: [TechnicianGroupIdentifierInput]
+  customFields: JSON
+}
+
+input UpdateClientSiteInput {
+  id: ID!
+  name: String
+  timezoneCode: String
+  working24x7: Boolean
+  businessHour: [CreateBusinessHourInput]
+  holidayList: HolidayListIdentifierInput
+  line1: String
+  line2: String
+  line3: String
+  city: String
+  postalCode: String
+  countryCode: String
+  stateCode: String
+  contactNumber: String
+  hq: Boolean
+}
+
+input UpdateClientUserAssociationInput {
+  id: ID!
+  site: ClientSiteIdentifierInput!
+}
+
+input UpdateClientUserInput {
+  userId: ID!
+  firstName: String
+  lastName: String
+  email: String
+  contactNumber: String
+  reportingManager: ClientUserIdentifierInput
+  site: ClientSiteIdentifierInput
+  role: RoleIdentifierInput
+  customFields: JSON
+}
+
+input UpdateContractInput {
+  contractId: ID!
+  billableContract: UpdateBillableContractInput
+}
+
+input UpdateFieldInput {
+  id: ID!
+  label: String
+  description: String
+  showToRequester: Boolean
+  mandatoryOnCreate: Boolean
+  mandatoryOnClosure: Boolean
+  addOptions: [CreateFieldOptionInput]
+  updateOptions: [UpdateFieldOptionInput]
+  deleteOptions: [IdentifierInput]
+}
+
+input UpdateFieldOptionInput {
+  id: ID!
+  value: String
+  description: String
+  order: Int
+}
+
+input UpdateHourlyServiceTypeItemInput {
+  roundUpValue: Int
+}
+
+input UpdateInvoiceInput {
+  invoiceId: ID!
+  statusEnum: InvoiceStatus
+  invoiceDate: String
+  dueDate: String
+  paymentDate: String
+  paymentMethod: PaymentMethodIdentifierInput
+  paymentReference: String
+  invoicePaymentTerm: PaymentTermIdentifierInput
+}
+
+input UpdateItDocumentationInput {
+  typeId: ID!
+  itDocId: ID!
+  name: String
+  client: ClientIdentifierInput
+  site: ClientSiteIdentifierInput
+  customFields: JSON
+}
+
+input UpdateKbArticleInput {
+  itemId: ID!
+  name: String
+  parent: KBItemIdentifierInput
+  status: ArticleStatus
+  content: String
+  visibility: DocumentSharedUpdateInput
+  loginRequired: Boolean
+}
+
+input UpdateKbCollectionInput {
+  itemId: ID!
+  name: String!
+}
+
+input UpdateNoteInput {
+  noteId: ID!
+  workItem: WorkItemIdentifierInput!
+  content: String
+  mentions: [UserIdentifierInput]
+  addAttachments: [CreateAttachmentInput]
+  deleteAttachments: [CreateAttachmentInput]
+  privacyType: NotePrivacyType
+}
+
+input UpdateRedeemableServiceBundleInput {
+  applicableType: RedeemableBundleApplicableType
+  applicableHours: RedeemableBundleApplicableHours
+  redeemableQuantity: String
+}
+
+input UpdateServiceCatalogItemInput {
+  itemId: ID!
+  name: String
+  description: String
+  category: ServiceCategoryIdentifierInput
+  offerAsWorklogItem: Boolean
+  taxable: Boolean
+  salesTax: TaxIdentifierInput
+  costPrice: PricingModelInput
+  sellingPrice: PricingModelInput
+  serviceTypeItem: UpdateServiceTypeItemInput
+}
+
+input UpdateServiceTypeItemInput {
+  addBundledItems: [ServiceCatalogItemIdentifierInput!]
+  deleteBundledItems: [ServiceCatalogItemIdentifierInput!]
+  hourlyServiceTypeItem: UpdateHourlyServiceTypeItemInput
+  redeemableServiceBundle: UpdateRedeemableServiceBundleInput
+}
+
+input UpdateTechnicianInput {
+  userId: ID!
+  firstName: String
+  lastName: String
+  email: String
+  contactNumber: String
+  emailSignature: String
+  designation: DesignationIdentifierInput
+  businessFunction: BusinessFunctionIdentifierInput
+  team: TeamIdentifierInput
+  reportingManager: TechnicianIdentifierInput
+  addGroups: [TechnicianGroupIdentifierInput]
+  deleteGroups: [TechnicianGroupIdentifierInput]
+  role: RoleIdentifierInput
+}
+
+input UpdateTicketInput {
+  ticketId: ID!
+  subject: String
+  client: ClientIdentifierInput
+  site: ClientSiteIdentifierInput
+  requester: ClientUserIdentifierInput
+  techGroup: TechnicianGroupIdentifierInput
+  technician: TechnicianIdentifierInput
+  status: String
+  priority: String
+  impact: String
+  urgency: String
+  category: String
+  subcategory: String
+  cause: String
+  subcause: String
+  resolutionCode: String
+  requestType: String
+  source: TicketSource
+  customFields: JSON
+  addAdditionalRequester: [ClientUserIdentifierInput]
+  deleteAdditionalRequester: [ClientUserIdentifierInput]
+  addFollowers: [TechnicianIdentifierInput]
+  deleteFollowers: [TechnicianIdentifierInput]
+  suppressCloseNotification: Boolean
+  firstResponseTime: String
+  resolutionTime: String
+}
+
+input UpdateWorklogEntryInput {
+  itemId: ID!
+  serviceItem: ServiceItemIdentifierInput
+  billable: Boolean
+  afterHours: Boolean
+  qty: String
+  unitPrice: String
+  billDateTime: String
+  notes: String
+}
+
+type UpdatedAsset {
+  assetId: ID
+  name: String!
+  assetClass: JSON!
+  client: JSON!
+  site: JSON!
+  requester: JSON!
+  customFields: JSON
+}
+
+type Urgency {
+  id: ID!
+  name: String!
+}
+
+input UserIdentifierInput {
+  userId: ID!
+}
+
+enum UserRoleSharedType {
+  AllRoles
+  Role
+}
+
+enum UserSharedType {
+  AllUsers
+  User
+}
+
+input WorkItemIdentifierInput {
+  workId: ID!
+  module: WorkModule!
+}
+
+enum WorkModule {
+  TICKET
+  PROJECT
+}
+
+enum WorkState {
+  PLANNED
+  PROGRESS
+  BLOCKED
+  COMPLETED
+  CANCELLED
+}
+
+type WorkStatus {
+  statusId: ID!
+  name: String!
+  state: WorkState
+}
+
+type WorklogEntry {
+  itemId: ID!
+  status: OfferedItemAuditStatus!
+  serviceItem: JSON!
+  billable: Boolean!
+  afterHours: Boolean!
+  qty: String!
+  unitPrice: String
+  billDateTime: String!
+  technician: JSON!
+  notes: String
+  workItem: JSON!
+}
+
+input WorklogEntryIdentifier {
+  itemId: ID!
+}
+
+type WorklogEntryList {
+  entries: [WorklogEntry]
+  listInfo: ListInfo
+}
+
+type Query {
+  getAlertList(input: ListInfoInput!): AlertList
+  getAlertsForAsset(input: AssetDetailsListInput!): AlertList
+  getAllFields(input: String!): [Field]
+  getAsset(input: AssetIdentifierInput!): Asset
+  getAssetActivity(input: AssetDetailsListInput!): AssetActivityList
+  getAssetCustomFields(input: [String!]): [CustomField]
+  getAssetDiskDetails(input: AssetIdentifierInput!): [AssetDisk]
+  getAssetInfoByTPEndpointIds(input: TPAssetInfoInput): [TPEndpointAssetInfo]
+  getAssetList(input: ListInfoInput!): AssetList
+  getAssetPatchDetails(input: AssetDetailsListInput!): AssetPatchList
+  getAssetPatchStatus(input: AssetIdentifierInput!): String
+  getAssetSoftwareList(input: AssetDetailsListInput!): AssetSoftwareList
+  getAssetSummary(input: AssetIdentifierInput!): AssetSummary
+  getAssetUserLog(input: AssetIdentifierInput!): [AssetUserLog]
+  getBusinessFunctionList: [BusinessFunction]
+  getCategoryList: [Category]
+  getCauseList: [Cause]
+  getClient(input: ClientIdentifierInput!): Client
+  getClientContract(input: ContractIdentifierInput!): ClientContract
+  getClientContractList(input: ListInfoInput): ClientContractList
+  getClientCustomField(input: CustomFieldIdentifierInput): CustomField
+  getClientCustomFieldList: [CustomField]
+  getClientList(input: ListInfoInput!): ClientList
+  getClientSite(input: ClientSiteIdentifierInput!): ClientSite
+  getClientSiteList(input: GetClientSiteListInput!): ClientSiteList
+  getClientStageList: [ClientStage]
+  getClientUser(input: ClientUserIdentifierInput!): ClientUser
+  getClientUserAssociationList(input: ListInfoInput!): ClientUserAssociationList
+  getClientUserList(input: GetClientUserListInput!): ClientUserList
+  getDesignationList: [Designation]
+  getDeviceCategories(input: DeviceCategoryIdentifierInput): [DeviceCategory]
+  getField(input: FieldIdentifierInput!): Field
+  getFields(input: [FieldIdentifierInput!]!): [Field]
+  getHolidayList: [HolidayList]
+  getImpactList: [Impact]
+  getInvoice(input: InvoiceIdentifierInput!): Invoice
+  getInvoiceItemList(input: ListInfoInput!): InvoiceItemList
+  getInvoiceList(input: ListInfoInput!): InvoiceList
+  getItDocumentation(input: ItDocumentationIdentifierInput!): ItDocumentation
+  getItDocumentationCategories: [ITDocumentationType]
+  getItDocumentationList(input: ItDocumentationListInput!): ItDocumentationList
+  getKbItem(input: KBItemIdentifierInput!): KbItem
+  getKbItems(listInfo: ListInfoInput!): KbItemList
+  getOfferedItems(input: ListInfoInput): OfferedItemList
+  getPaymentMethodList: [PaymentMethod]
+  getPaymentTermList: [PaymentTerm]
+  getPriorityList: [Priority]
+  getRequesterRoleList: [Role]
+  getResolutionCodeList: [ResolutionCode]
+  getSLAList: [SLA]
+  getScriptList(input: ListInfoInput!): ScriptList
+  getScriptListByType(input: ScriptListByTypeInput!): ScriptList
+  getServiceCatalogItem(input: ServiceCatalogItemIdentifierInput!): ServiceCatalogItem
+  getServiceCatalogItemList(input: ListInfoInput!): ServiceCatalogItemList
+  getServiceCategoryList: [ServiceCategory]
+  getServiceItem(input: ServiceItemIdentifierInput!): ServiceItem
+  getServiceItemList(input: ListInfoInput!): ServiceItemList
+  getStatusList: [Status]
+  getTask(input: GetTaskInput!): Task
+  getTaskList(input: GetTaskListInput!): TaskList
+  getTax(input: TaxIdentifierInput!): Tax
+  getTaxList(input: ListInfoInput!): TaxList
+  getTeamList: [Team]
+  getTechnicianGroupList: [TechnicianGroup]
+  getTechnicianList(input: ListInfoInput!): TechnicianList
+  getTechnicianRoleList: [Role]
+  getTicket(input: TicketIdentifierInput!): Ticket
+  getTicketConversationList(input: TicketIdentifierInput!): [TicketConversation]
+  getTicketCustomField(input: CustomFieldIdentifierInput): CustomField
+  getTicketCustomFieldList: [CustomField]
+  getTicketList(input: ListInfoInput!): TicketList
+  getTicketNoteList(input: TicketIdentifierInput!): [Note]
+  getUnMonitoredAssetList(input: ListInfoInput!): AssetList
+  getUrgencyList: [Urgency]
+  getWorkStatusList: [WorkStatus]
+  getWorklogEntries(input: GetWorklogEntriesInput!): WorklogEntryList
+}
+
+type Mutation {
+  assignDeviceCategory(input: AssignDeviceCategoryInput): Boolean
+  createAlert(input: CreateAlertInput!): Alert
+  createCategories(input: [CreateCategoryInput!]!): [Category]
+  createCauses(input: [CreateCauseInput!]!): [Cause]
+  createClient(input: CreateClientInput!): Client
+  createClientContract(input: CreateClientContractInput!): ID!
+  createClientCustomField(input: CreateCustomFieldInput!): CustomField
+  createClientSite(input: CreateClientSiteInput!): ClientSite
+  createClientUser(input: CreateClientUserInput!): ClientUser
+  createClientUserAssociations(input: [CreateClientUserAssociationInput!]!): [ClientUserAssociation]
+  createClientV2(input: CreateClientInputV2!): Client
+  createField(input: CreateFieldInput!): Field
+  createInvoice(input: CreateInvoiceInput!): Invoice
+  createItDocumentation(input: CreateItDocumentationInput!): ItDocumentation
+  createKbArticle(input: CreateKbArticleInput!): KbArticle
+  createKbCollection(input: CreateKbCollectionInput!): KbCollection
+  createNote(input: CreateNoteInput!): Note
+  createServiceCatalogItem(input: CreateServiceCatalogItemInput!): ServiceCatalogItem
+  createServiceCategory(input: CreateServiceCategoryInput!): ServiceCategory
+  createServiceItem(input: CreateServiceItemInput!): ServiceItem
+  createStatus(input: [CreateStatusInput!]!): [Status]
+  createTask(input: CreateTaskInput!): Task
+  createTax(input: CreateTaxInput!): Tax
+  createTechnician(input: CreateTechnicianInput): Technician
+  createTicket(input: CreateTicketInput!): Ticket
+  createTicketConversation(input: CreateTicketConversationInput!): TicketConversation
+  createTicketCustomField(input: CreateCustomFieldInput!): CustomField
+  createTicketNote(input: CreateTicketNoteInput!): Note
+  createWorklogEntries(input: [CreateWorklogEntryInput!]!): [WorklogEntry]
+  deleteClientSites(input: [ClientSiteIdentifierInput!]!): [ID]
+  deleteClientUser(input: DeleteUserInput!): ID!
+  deleteClientUserAssociations(input: [ClientUserAssociationIdentifierInput!]!): [ID]
+  deleteField(input: FieldIdentifierInput): Field
+  deleteItDocumentation(input: ItDocumentationIdentifierInput!): Boolean
+  deleteKbArticle(input: DeleteKbArticleInput!): Boolean
+  deleteKbCollection(input: DeleteKbCollectionInput!): Boolean
+  deleteTechnician(input: DeleteUserInput!): ID
+  deleteWorklogEntry(input: WorklogEntryIdentifier!): Boolean
+  hardDeleteClients(input: [ClientIdentifierInput!]!): Boolean
+  hardDeleteTickets(input: [TicketIdentifierInput]): Boolean
+  resolveAlerts(input: [ResolveAlertInput]): Boolean
+  restoreClients(input: [ClientIdentifierInput!]!): Boolean
+  restoreTickets(input: [TicketIdentifierInput]): Boolean
+  runScriptOnAsset(input: RunScriptInput!): RunScriptData
+  softDeleteAsset(input: AssetIdentifierInput): Boolean
+  softDeleteClients(input: [ClientIdentifierInput!]!): Boolean
+  softDeleteTickets(input: [TicketIdentifierInput]): Boolean
+  updateAsset(input: UpdateAssetInput!): UpdatedAsset
+  updateClient(input: UpdateClientInput!): Client
+  updateClientContract(input: UpdateClientContractInput!): ID!
+  updateClientSite(input: UpdateClientSiteInput!): ClientSite
+  updateClientUser(input: UpdateClientUserInput!): ClientUser
+  updateClientUserAssociations(input: [UpdateClientUserAssociationInput!]!): [ClientUserAssociation]
+  updateField(input: UpdateFieldInput!): Field
+  updateInvoice(input: UpdateInvoiceInput!): Invoice
+  updateItDocumentation(input: UpdateItDocumentationInput!): ItDocumentation
+  updateKbArticle(input: UpdateKbArticleInput!): KbArticle
+  updateKbCollection(input: UpdateKbCollectionInput!): KbCollection
+  updateNote(input: UpdateNoteInput!): Note
+  updateServiceCatalogItem(input: UpdateServiceCatalogItemInput!): ServiceCatalogItem
+  updateTechnician(input: UpdateTechnicianInput): Technician
+  updateTicket(input: UpdateTicketInput!): Ticket
+  updateWorklogEntry(input: UpdateWorklogEntryInput!): WorklogEntry
+}

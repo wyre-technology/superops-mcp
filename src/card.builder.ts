@@ -89,18 +89,22 @@ export interface TicketCard {
 const CARD_DESCRIPTION_MAX_LENGTH = 500;
 
 /**
- * Resolve a display label for a nested SuperOps entity: the GraphQL queries
- * already fetch resolved `name` strings alongside ids, so prefer the name and
- * fall back to `#id`.
+ * Resolve a display label for a nested SuperOps entity.
+ *
+ * These fields (`client`, `site`, `requester`, `technician`, `techGroup`)
+ * arrive through the GraphQL `JSON` scalar, so they are opaque objects rather
+ * than typed selections — prefer whichever name-ish key is present and fall
+ * back to `#id`. Some, like `category`, are plain strings.
  */
 function label(entity: unknown, ...nameKeys: string[]): string | undefined {
+  if (typeof entity === "string") return entity || undefined;
   if (!entity || typeof entity !== "object") return undefined;
   const record = entity as Record<string, unknown>;
   for (const key of nameKeys) {
     const value = record[key];
     if (typeof value === "string" && value) return value;
   }
-  const id = record.id ?? record.accountId;
+  const id = record.id ?? record.accountId ?? record.userId ?? record.groupId;
   if (id != null && id !== "") return `#${id}`;
   return undefined;
 }
@@ -135,15 +139,17 @@ export function buildTicketCard(ticket: Record<string, unknown>): TicketCard | n
     const card: TicketCard = {
       ticketId: ticket.ticketId,
       subject: ticket.subject,
-      // SuperOps' client-portal visibility control on a note is the universal
-      // `isPublic` boolean (not a tenant-specific enum), so an internal-only
-      // default (isPublic: false) is always safe. The card never guesses
+      // SuperOps controls note visibility with the NotePrivacyType enum
+      // (PUBLIC/PRIVATE); superops_tickets_add_note exposes that as an
+      // `isPublic` boolean and maps it. Defaulting to false (PRIVATE) keeps
+      // a note internal unless someone opts in — the card never guesses
       // visibility itself.
       noteDefaults: { isPublic: false },
     };
 
-    if (typeof ticket.ticketNumber === "string" && ticket.ticketNumber) {
-      card.ticketNumber = ticket.ticketNumber;
+    // SuperOps calls the human-facing ticket number `displayId`.
+    if (typeof ticket.displayId === "string" && ticket.displayId) {
+      card.ticketNumber = ticket.displayId;
     }
     if (typeof ticket.status === "string" && ticket.status) card.status = ticket.status;
     if (typeof ticket.priority === "string" && ticket.priority) {
@@ -153,8 +159,10 @@ export function buildTicketCard(ticket: Record<string, unknown>): TicketCard | n
     const client = label(ticket.client, "name");
     const site = label(ticket.site, "name");
     const requester = label(ticket.requester, "name", "email");
-    const assignee = label(ticket.assignee, "name", "email");
+    // The assigned tech is `technician` in SuperOps; the card calls it assignee.
+    const assignee = label(ticket.technician, "name", "email");
     const techGroup = label(ticket.techGroup, "name");
+    // `category` is a plain String in SuperOps, which label() passes through.
     const category = label(ticket.category, "name");
     if (client) card.client = client;
     if (site) card.site = site;
@@ -164,8 +172,11 @@ export function buildTicketCard(ticket: Record<string, unknown>): TicketCard | n
     if (category) card.category = category;
 
     if (ticket.createdTime) card.createdTime = String(ticket.createdTime);
-    if (ticket.lastUpdatedTime) card.lastUpdatedTime = String(ticket.lastUpdatedTime);
+    if (ticket.updatedTime) card.lastUpdatedTime = String(ticket.updatedTime);
 
+    // SuperOps' Ticket type has no readable description/body — it is write-only
+    // on CreateTicketInput, and the thread lives in getTicketConversationList.
+    // Callers may still pass one through; render it when present.
     const description = toSnippet(ticket.description);
     if (description) card.description = description;
 

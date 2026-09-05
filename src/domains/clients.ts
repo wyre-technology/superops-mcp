@@ -2,11 +2,25 @@
  * SuperOps.ai Clients Domain
  *
  * Tools for managing clients (accounts) in SuperOps.ai PSA.
+ *
+ * The `Client` type exposes `accountManager`, `primaryContact`,
+ * `secondaryContact`, `hqSite`, `technicianGroups` and `customFields` through
+ * the `JSON` scalar. They must be selected bare — a subselection on a scalar is
+ * rejected outright by the API.
  */
 
 import { getClient } from "../client.js";
-import type { DomainTools, Client, ListInfo } from "../types.js";
+import type {
+  DomainTools,
+  Client,
+  ListInfo,
+  ListInfoInput,
+  RuleConditionInput,
+} from "../types.js";
 import { elicitText } from "../utils/elicitation.js";
+
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 100;
 
 const LIST_CLIENTS_QUERY = `
   query getClientList($input: ListInfoInput!) {
@@ -17,27 +31,15 @@ const LIST_CLIENTS_QUERY = `
         stage
         status
         emailDomains
-        phone
-        website
-        industry
-        employeeCount
-        accountManager {
-          id
-          name
-          email
-        }
-        primaryContact {
-          id
-          name
-          email
-        }
-        createdTime
-        lastUpdatedTime
+        accountManager
+        primaryContact
+        hqSite
       }
       listInfo {
+        page
+        pageSize
         totalCount
-        hasNextPage
-        endCursor
+        hasMore
       }
     }
   }
@@ -51,41 +53,12 @@ const GET_CLIENT_QUERY = `
       stage
       status
       emailDomains
-      website
-      phone
-      industry
-      employeeCount
-      annualRevenue
-      address {
-        street
-        city
-        state
-        country
-        postalCode
-      }
-      accountManager {
-        id
-        name
-        email
-        phone
-      }
-      primaryContact {
-        id
-        name
-        email
-        phone
-      }
-      sites {
-        id
-        name
-        isDefault
-      }
-      customFields {
-        name
-        value
-      }
-      createdTime
-      lastUpdatedTime
+      accountManager
+      primaryContact
+      secondaryContact
+      hqSite
+      technicianGroups
+      customFields
     }
   }
 `;
@@ -96,15 +69,15 @@ const SEARCH_CLIENTS_QUERY = `
       clients {
         accountId
         name
-        emailDomains
-        status
         stage
-        phone
+        status
+        emailDomains
       }
       listInfo {
+        page
+        pageSize
         totalCount
-        hasNextPage
-        endCursor
+        hasMore
       }
     }
   }
@@ -121,13 +94,34 @@ interface GetClientResponse {
   getClient: Client;
 }
 
+function pageOf(page?: number): number {
+  return Math.max(Math.trunc(page ?? 1), 1);
+}
+
+function pageSizeOf(pageSize?: number): number {
+  return Math.min(Math.max(Math.trunc(pageSize ?? DEFAULT_PAGE_SIZE), 1), MAX_PAGE_SIZE);
+}
+
+/**
+ * SuperOps accepts exactly ONE condition clause per request, and validates the
+ * `attribute`/`operator` strings at runtime — the schema types them as plain
+ * `String`, so a bad pair fails at the API, not at query validation. Only
+ * `includes` (array value), `contains` and `startsWith` (string value) are
+ * documented. A tenant needing anything else should use `superops_custom_query`.
+ */
+function condition(attribute: string, operator: string, value: unknown): RuleConditionInput {
+  return { attribute, operator, value };
+}
+
 export function getClientsTools(): DomainTools {
   return {
     tools: [
       {
         name: "superops_clients_list",
         description:
-          "List clients (accounts) in SuperOps.ai. Can filter by status, stage, or paginate through results.",
+          "List clients (accounts) in SuperOps.ai. Results are paginated with page/pageSize. " +
+          "SuperOps accepts only one filter per request, so status takes precedence over stage " +
+          "when both are supplied.",
         inputSchema: {
           type: "object",
           properties: {
@@ -138,17 +132,19 @@ export function getClientsTools(): DomainTools {
             },
             stage: {
               type: "string",
-              description: "Filter by stage: Lead, Prospect, Customer, or Churned",
+              description:
+                "Filter by stage: Lead, Prospect, Customer, or Churned (ignored if status is also given)",
               enum: ["Lead", "Prospect", "Customer", "Churned"],
             },
-            max: {
+            page: {
               type: "number",
-              description: "Maximum number of results (default: 50, max: 500)",
-              default: 50,
+              description: "1-indexed page number (default: 1)",
+              default: 1,
             },
-            cursor: {
-              type: "string",
-              description: "Pagination cursor for fetching next page",
+            pageSize: {
+              type: "number",
+              description: `Results per page (default: ${DEFAULT_PAGE_SIZE}, max: ${MAX_PAGE_SIZE})`,
+              default: DEFAULT_PAGE_SIZE,
             },
           },
         },
@@ -170,18 +166,24 @@ export function getClientsTools(): DomainTools {
       {
         name: "superops_clients_search",
         description:
-          "Search for clients by name or email domain. Returns matching clients with basic information.",
+          "Search for clients by name. SuperOps accepts a single filter clause per request, " +
+          "so this matches the client name only — it cannot also search email domains.",
         inputSchema: {
           type: "object",
           properties: {
             query: {
               type: "string",
-              description: "Search term to find clients by name or email domain",
+              description: "Substring to match against the client name",
             },
-            max: {
+            page: {
               type: "number",
-              description: "Maximum number of results (default: 20)",
-              default: 20,
+              description: "1-indexed page number (default: 1)",
+              default: 1,
+            },
+            pageSize: {
+              type: "number",
+              description: `Results per page (default: ${DEFAULT_PAGE_SIZE}, max: ${MAX_PAGE_SIZE})`,
+              default: DEFAULT_PAGE_SIZE,
             },
           },
           required: ["query"],
@@ -198,13 +200,16 @@ export function getClientsTools(): DomainTools {
             const params = args as {
               status?: string;
               stage?: string;
-              max?: number;
-              cursor?: string;
+              page?: number;
+              pageSize?: number;
             };
 
-            // If no filters provided, elicit a search term from the user
-            const hasFilters = params.status || params.stage;
-            if (!hasFilters && !params.cursor) {
+            const page = pageOf(params.page);
+            const pageSize = pageSizeOf(params.pageSize);
+
+            // If no filters provided, elicit a search term from the user.
+            const hasFilters = Boolean(params.status || params.stage);
+            if (!hasFilters && params.page === undefined) {
               const searchTerm = await elicitText(
                 "No filters specified. Would you like to search for a specific client?",
                 "search",
@@ -212,19 +217,15 @@ export function getClientsTools(): DomainTools {
               );
               if (searchTerm) {
                 // Redirect to the search handler which supports name filtering
+                const searchInput: ListInfoInput = {
+                  page,
+                  pageSize,
+                  condition: condition("name", "contains", searchTerm),
+                  sort: [{ attribute: "name", order: "ASC" }],
+                };
                 const searchResponse = await client.query<ListClientsResponse>(
                   SEARCH_CLIENTS_QUERY,
-                  {
-                    input: {
-                      first: Math.min(params.max ?? 50, 500),
-                      filter: {
-                        or: [
-                          { name: { contains: searchTerm } },
-                          { emailDomains: { contains: searchTerm } },
-                        ],
-                      },
-                    },
-                  }
+                  { input: searchInput }
                 );
                 return {
                   content: [
@@ -237,17 +238,19 @@ export function getClientsTools(): DomainTools {
               }
             }
 
-            const filter: Record<string, unknown> = {};
-            if (params.status) filter.status = params.status;
-            if (params.stage) filter.stage = params.stage;
+            const input: ListInfoInput = {
+              page,
+              pageSize,
+              sort: [{ attribute: "name", order: "ASC" }],
+            };
+            if (params.status) {
+              input.condition = condition("status", "includes", [params.status]);
+            } else if (params.stage) {
+              input.condition = condition("stage", "includes", [params.stage]);
+            }
 
             const response = await client.query<ListClientsResponse>(LIST_CLIENTS_QUERY, {
-              input: {
-                first: Math.min(params.max ?? 50, 500),
-                ...(params.cursor && { after: params.cursor }),
-                ...(Object.keys(filter).length > 0 && { filter }),
-                orderBy: { field: "name", direction: "ASC" },
-              },
+              input,
             });
 
             return {
@@ -278,18 +281,17 @@ export function getClientsTools(): DomainTools {
           }
 
           case "superops_clients_search": {
-            const params = args as { query: string; max?: number };
+            const params = args as { query: string; page?: number; pageSize?: number };
+
+            const input: ListInfoInput = {
+              page: pageOf(params.page),
+              pageSize: pageSizeOf(params.pageSize),
+              condition: condition("name", "contains", params.query),
+              sort: [{ attribute: "name", order: "ASC" }],
+            };
 
             const response = await client.query<ListClientsResponse>(SEARCH_CLIENTS_QUERY, {
-              input: {
-                first: Math.min(params.max ?? 20, 100),
-                filter: {
-                  or: [
-                    { name: { contains: params.query } },
-                    { emailDomains: { contains: params.query } },
-                  ],
-                },
-              },
+              input,
             });
 
             return {

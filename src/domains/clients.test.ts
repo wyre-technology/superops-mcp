@@ -2,6 +2,10 @@
  * Clients Domain Tests
  *
  * Tests for client (account) management tools.
+ *
+ * These assert the exact `ListInfoInput` shape SuperOps expects — page/pageSize
+ * offsets and a single `RuleConditionInput` clause — plus the field selections,
+ * so an invented field or a subselection on a JSON scalar cannot creep back in.
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
@@ -14,8 +18,37 @@ vi.mock("../client.js", () => ({
   })),
 }));
 
+// Mock elicitation: null (client declined / unsupported) unless a test opts in.
+vi.mock("../utils/elicitation.js", () => ({
+  elicitText: vi.fn(async () => null),
+}));
+
 import { getClient } from "../client.js";
+import { elicitText } from "../utils/elicitation.js";
 import { getClientsTools } from "./clients.js";
+
+/** Fields the real SuperOps `Client` type does not define. */
+const INVENTED_CLIENT_FIELDS = [
+  "phone",
+  "website",
+  "industry",
+  "employeeCount",
+  "annualRevenue",
+  "address",
+  "sites",
+  "createdTime",
+  "lastUpdatedTime",
+];
+
+/** JSON scalars — selecting a subfield on any of these is rejected by the API. */
+const JSON_SCALAR_FIELDS = [
+  "accountManager",
+  "primaryContact",
+  "secondaryContact",
+  "hqSite",
+  "technicianGroups",
+  "customFields",
+];
 
 describe("Clients Domain", () => {
   let mockClient: { query: ReturnType<typeof vi.fn>; mutate: ReturnType<typeof vi.fn> };
@@ -26,10 +59,18 @@ describe("Clients Domain", () => {
       mutate: vi.fn(),
     };
     vi.mocked(getClient).mockReturnValue(mockClient as unknown as ReturnType<typeof getClient>);
+    vi.mocked(elicitText).mockResolvedValue(null);
   });
 
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  const listResponse = (clients: unknown[] = []) => ({
+    getClientList: {
+      clients,
+      listInfo: { page: 1, pageSize: 50, totalCount: clients.length, hasMore: false },
+    },
   });
 
   describe("getClientsTools", () => {
@@ -58,42 +99,36 @@ describe("Clients Domain", () => {
       expect(tool?.description).toContain("List clients");
       expect(tool?.inputSchema.properties).toHaveProperty("status");
       expect(tool?.inputSchema.properties).toHaveProperty("stage");
-      expect(tool?.inputSchema.properties).toHaveProperty("max");
-      expect(tool?.inputSchema.properties).toHaveProperty("cursor");
+      expect(tool?.inputSchema.properties).toHaveProperty("page");
+      expect(tool?.inputSchema.properties).toHaveProperty("pageSize");
+      // Relay-style pagination is gone for good.
+      expect(tool?.inputSchema.properties).not.toHaveProperty("max");
+      expect(tool?.inputSchema.properties).not.toHaveProperty("cursor");
+      expect(tool?.inputSchema.properties.page).toMatchObject({ default: 1 });
+      expect(tool?.inputSchema.properties.pageSize).toMatchObject({ default: 50 });
     });
 
-    it("calls query with default parameters", async () => {
-      const mockResponse = {
-        getClientList: {
-          clients: [{ accountId: "1", name: "Test Client" }],
-          listInfo: { totalCount: 1, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("calls query with default page/pageSize and name sort", async () => {
+      mockClient.query.mockResolvedValue(listResponse([{ accountId: "1", name: "Test Client" }]));
 
       const domain = getClientsTools();
       const result = await domain.handleCall("superops_clients_list", {});
 
       expect(mockClient.query).toHaveBeenCalledWith(
         expect.stringContaining("getClientList"),
-        expect.objectContaining({
-          input: expect.objectContaining({
-            first: 50,
-            orderBy: { field: "name", direction: "ASC" },
-          }),
-        })
+        {
+          input: {
+            page: 1,
+            pageSize: 50,
+            sort: [{ attribute: "name", order: "ASC" }],
+          },
+        }
       );
       expect(result.content[0].text).toContain("Test Client");
     });
 
-    it("applies status filter", async () => {
-      const mockResponse = {
-        getClientList: {
-          clients: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("applies status filter as a single includes condition", async () => {
+      mockClient.query.mockResolvedValue(listResponse());
 
       const domain = getClientsTools();
       await domain.handleCall("superops_clients_list", { status: "Active" });
@@ -102,20 +137,14 @@ describe("Clients Domain", () => {
         expect.any(String),
         expect.objectContaining({
           input: expect.objectContaining({
-            filter: { status: "Active" },
+            condition: { attribute: "status", operator: "includes", value: ["Active"] },
           }),
         })
       );
     });
 
-    it("applies stage filter", async () => {
-      const mockResponse = {
-        getClientList: {
-          clients: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("applies stage filter as a single includes condition", async () => {
+      mockClient.query.mockResolvedValue(listResponse());
 
       const domain = getClientsTools();
       await domain.handleCall("superops_clients_list", { stage: "Customer" });
@@ -124,54 +153,102 @@ describe("Clients Domain", () => {
         expect.any(String),
         expect.objectContaining({
           input: expect.objectContaining({
-            filter: { stage: "Customer" },
+            condition: { attribute: "stage", operator: "includes", value: ["Customer"] },
           }),
         })
       );
     });
 
-    it("respects max parameter with upper limit of 500", async () => {
-      const mockResponse = {
-        getClientList: {
-          clients: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("sends only one condition when status and stage are both given", async () => {
+      mockClient.query.mockResolvedValue(listResponse());
 
       const domain = getClientsTools();
-      await domain.handleCall("superops_clients_list", { max: 1000 });
+      await domain.handleCall("superops_clients_list", {
+        status: "Active",
+        stage: "Customer",
+      });
+
+      const input = mockClient.query.mock.calls[0][1].input;
+      expect(input.condition).toEqual({
+        attribute: "status",
+        operator: "includes",
+        value: ["Active"],
+      });
+      expect(Array.isArray(input.condition)).toBe(false);
+    });
+
+    it("omits condition entirely when no filter is given", async () => {
+      mockClient.query.mockResolvedValue(listResponse());
+
+      const domain = getClientsTools();
+      await domain.handleCall("superops_clients_list", { page: 2 });
+
+      expect(mockClient.query.mock.calls[0][1].input).not.toHaveProperty("condition");
+    });
+
+    it("caps pageSize at 100 and floors it at 1", async () => {
+      mockClient.query.mockResolvedValue(listResponse());
+
+      const domain = getClientsTools();
+      await domain.handleCall("superops_clients_list", { pageSize: 1000 });
+      expect(mockClient.query.mock.calls[0][1].input.pageSize).toBe(100);
+
+      await domain.handleCall("superops_clients_list", { pageSize: 0 });
+      expect(mockClient.query.mock.calls[1][1].input.pageSize).toBe(1);
+    });
+
+    it("passes the requested page through", async () => {
+      mockClient.query.mockResolvedValue(listResponse());
+
+      const domain = getClientsTools();
+      await domain.handleCall("superops_clients_list", { page: 3, pageSize: 25 });
 
       expect(mockClient.query).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
-          input: expect.objectContaining({
-            first: 500, // Should be capped at 500
-          }),
+          input: expect.objectContaining({ page: 3, pageSize: 25 }),
         })
       );
     });
 
-    it("passes cursor for pagination", async () => {
-      const mockResponse = {
-        getClientList: {
-          clients: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("elicits a search term when no filters are given and searches by name", async () => {
+      vi.mocked(elicitText).mockResolvedValue("acme");
+      mockClient.query.mockResolvedValue(listResponse([{ accountId: "1", name: "Acme Corp" }]));
 
       const domain = getClientsTools();
-      await domain.handleCall("superops_clients_list", { cursor: "abc123" });
+      const result = await domain.handleCall("superops_clients_list", {});
 
+      expect(elicitText).toHaveBeenCalledOnce();
       expect(mockClient.query).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          input: expect.objectContaining({
-            after: "abc123",
-          }),
-        })
+        expect.stringContaining("searchClients"),
+        {
+          input: {
+            page: 1,
+            pageSize: 50,
+            condition: { attribute: "name", operator: "contains", value: "acme" },
+            sort: [{ attribute: "name", order: "ASC" }],
+          },
+        }
       );
+      expect(result.content[0].text).toContain("Acme Corp");
+    });
+
+    it("does not elicit when a filter is supplied", async () => {
+      mockClient.query.mockResolvedValue(listResponse());
+
+      const domain = getClientsTools();
+      await domain.handleCall("superops_clients_list", { status: "Active" });
+
+      expect(elicitText).not.toHaveBeenCalled();
+    });
+
+    it("does not elicit when paging beyond the first page", async () => {
+      mockClient.query.mockResolvedValue(listResponse());
+
+      const domain = getClientsTools();
+      await domain.handleCall("superops_clients_list", { page: 2 });
+
+      expect(elicitText).not.toHaveBeenCalled();
     });
   });
 
@@ -219,78 +296,43 @@ describe("Clients Domain", () => {
       expect(tool).toBeDefined();
       expect(tool?.description).toContain("Search for clients");
       expect(tool?.inputSchema.properties).toHaveProperty("query");
+      expect(tool?.inputSchema.properties).toHaveProperty("page");
+      expect(tool?.inputSchema.properties).toHaveProperty("pageSize");
       expect(tool?.inputSchema.required).toContain("query");
     });
 
-    it("constructs search filter with OR condition", async () => {
-      const mockResponse = {
-        getClientList: {
-          clients: [{ accountId: "1", name: "Acme Corp" }],
-          listInfo: { totalCount: 1, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("constructs a single name/contains condition", async () => {
+      mockClient.query.mockResolvedValue(listResponse([{ accountId: "1", name: "Acme Corp" }]));
 
       const domain = getClientsTools();
       await domain.handleCall("superops_clients_search", { query: "acme" });
 
-      expect(mockClient.query).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          input: expect.objectContaining({
-            filter: {
-              or: [
-                { name: { contains: "acme" } },
-                { emailDomains: { contains: "acme" } },
-              ],
-            },
-          }),
-        })
-      );
+      expect(mockClient.query).toHaveBeenCalledWith(expect.any(String), {
+        input: {
+          page: 1,
+          pageSize: 50,
+          condition: { attribute: "name", operator: "contains", value: "acme" },
+          sort: [{ attribute: "name", order: "ASC" }],
+        },
+      });
     });
 
-    it("respects max parameter with default of 20", async () => {
-      const mockResponse = {
-        getClientList: {
-          clients: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("caps pageSize at 100", async () => {
+      mockClient.query.mockResolvedValue(listResponse());
 
       const domain = getClientsTools();
-      await domain.handleCall("superops_clients_search", { query: "test" });
+      await domain.handleCall("superops_clients_search", { query: "test", pageSize: 200 });
 
-      expect(mockClient.query).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          input: expect.objectContaining({
-            first: 20,
-          }),
-        })
-      );
+      expect(mockClient.query.mock.calls[0][1].input.pageSize).toBe(100);
     });
 
-    it("caps max at 100", async () => {
-      const mockResponse = {
-        getClientList: {
-          clients: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("passes the requested page through", async () => {
+      mockClient.query.mockResolvedValue(listResponse());
 
       const domain = getClientsTools();
-      await domain.handleCall("superops_clients_search", { query: "test", max: 200 });
+      await domain.handleCall("superops_clients_search", { query: "test", page: 4 });
 
-      expect(mockClient.query).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          input: expect.objectContaining({
-            first: 100,
-          }),
-        })
-      );
+      expect(mockClient.query.mock.calls[0][1].input.page).toBe(4);
     });
   });
 
@@ -325,39 +367,72 @@ describe("Clients Domain", () => {
   });
 
   describe("GraphQL query structure", () => {
-    it("LIST_CLIENTS_QUERY includes required fields", async () => {
-      const mockResponse = {
-        getClientList: {
-          clients: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    const queryFor = async (tool: string, args: Record<string, unknown>): Promise<string> => {
+      mockClient.query.mockResolvedValue(
+        tool === "superops_clients_get" ? { getClient: {} } : listResponse()
+      );
+      await getClientsTools().handleCall(tool, args);
+      return mockClient.query.mock.calls[0][0] as string;
+    };
 
-      const domain = getClientsTools();
-      await domain.handleCall("superops_clients_list", {});
+    it("LIST_CLIENTS_QUERY selects real Client fields and offset listInfo", async () => {
+      const query = await queryFor("superops_clients_list", { status: "Active" });
 
-      const queryArg = mockClient.query.mock.calls[0][0];
-      expect(queryArg).toContain("accountId");
-      expect(queryArg).toContain("name");
-      expect(queryArg).toContain("status");
-      expect(queryArg).toContain("stage");
-      expect(queryArg).toContain("listInfo");
+      for (const field of ["accountId", "name", "stage", "status", "emailDomains"]) {
+        expect(query).toContain(field);
+      }
+      expect(query).toContain("page");
+      expect(query).toContain("pageSize");
+      expect(query).toContain("totalCount");
+      expect(query).toContain("hasMore");
+      expect(query).not.toContain("hasNextPage");
+      expect(query).not.toContain("endCursor");
+      expect(query).toContain("$input: ListInfoInput!");
     });
 
-    it("GET_CLIENT_QUERY includes detailed fields", async () => {
-      const mockResponse = {
-        getClient: { accountId: "1", name: "Test" },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("GET_CLIENT_QUERY selects the full real Client field set", async () => {
+      const query = await queryFor("superops_clients_get", { accountId: "1" });
 
-      const domain = getClientsTools();
-      await domain.handleCall("superops_clients_get", { accountId: "1" });
+      for (const field of [
+        "accountId",
+        "name",
+        "stage",
+        "status",
+        "emailDomains",
+        ...JSON_SCALAR_FIELDS,
+      ]) {
+        expect(query).toContain(field);
+      }
+      expect(query).toContain("$input: ClientIdentifierInput!");
+    });
 
-      const queryArg = mockClient.query.mock.calls[0][0];
-      expect(queryArg).toContain("address");
-      expect(queryArg).toContain("customFields");
-      expect(queryArg).toContain("sites");
+    const allTools: [string, Record<string, unknown>][] = [
+      ["superops_clients_list", { status: "Active" }],
+      ["superops_clients_get", { accountId: "1" }],
+      ["superops_clients_search", { query: "acme" }],
+    ];
+
+    it.each(allTools)("%s selects no field SuperOps does not define", async (tool, args) => {
+      const query = await queryFor(tool, args);
+
+      for (const field of INVENTED_CLIENT_FIELDS) {
+        expect(query, `${tool} must not select ${field}`).not.toContain(field);
+      }
+    });
+
+    const jsonScalarTools: [string, Record<string, unknown>][] = [
+      ["superops_clients_list", { status: "Active" }],
+      ["superops_clients_get", { accountId: "1" }],
+    ];
+
+    it.each(jsonScalarTools)("%s never subselects on a JSON scalar", async (tool, args) => {
+      const query = await queryFor(tool, args);
+
+      for (const field of JSON_SCALAR_FIELDS) {
+        expect(query, `${tool} must select ${field} bare`).not.toMatch(
+          new RegExp(`${field}\\s*\\{`)
+        );
+      }
     });
   });
 });
