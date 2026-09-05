@@ -206,6 +206,7 @@ export interface Technician {
   lastName?: string;
   email?: string;
   contactNumber?: string;
+  emailSignature?: string;
   designation?: Json;
   businessFunction?: Json;
   team?: Json;

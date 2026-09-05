@@ -13,6 +13,7 @@
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { buildSchema } from "graphql";
 
 const DOCS_URL = "https://developer.superops.com/msp";
 const OUT = join(dirname(fileURLToPath(import.meta.url)), "..", "schema", "superops.graphql");
@@ -130,6 +131,29 @@ const sdl =
   "\n" +
   [...[...scalars].sort().map((s) => `scalar ${s}`), ...parts].join("\n\n") +
   "\n";
+
+// Refuse to overwrite a working schema with a broken scrape. If SuperOps
+// changes the docs markup, the selectors above can silently yield an empty or
+// unparseable SDL — writing that would take every conformance test with it.
+let parsed;
+try {
+  parsed = buildSchema(sdl);
+} catch (cause) {
+  throw new Error(
+    `Generated SDL does not parse — the docs markup likely changed, so the ` +
+      `selectors in this script need updating. ${OUT} was left untouched.`,
+    { cause }
+  );
+}
+if (!parsed.getQueryType()) {
+  throw new Error(`Generated SDL has no Query type. ${OUT} was left untouched.`);
+}
+if (queries.length === 0 || parts.length < 50) {
+  throw new Error(
+    `Generated SDL looks truncated (${parts.length} definitions, ` +
+      `${queries.length} queries). ${OUT} was left untouched.`
+  );
+}
 
 writeFileSync(OUT, sdl);
 console.log(
