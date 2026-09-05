@@ -1,125 +1,136 @@
 /**
  * SuperOps.ai Technicians Domain
  *
- * Tools for managing technicians (agents) in SuperOps.ai PSA.
+ * Tools for reading technicians (agents) and technician groups from SuperOps.ai PSA.
+ *
+ * The SuperOps `Technician` type is deliberately narrow: there is no active/inactive
+ * flag, no ticket counts, no skills and no last-login. `designation`,
+ * `businessFunction`, `team`, `reportingManager`, `role` and `groups` are typed as
+ * `JSON` scalars, so they are selected bare — a subselection on them is rejected by
+ * the API — but the values are structured, not opaque. Verified against a live
+ * tenant: `role` is `{ roleId, name }` and `groups` is `[{ groupId, name }]`, the
+ * technician's actual group roster. `designation`, `businessFunction`, `team` and
+ * `reportingManager` are null unless the tenant assigns them.
+ *
+ * `userId`, `name`, `email` and `groups` are all filterable attributes on
+ * `getTechnicianList`; the operator vocabulary and the ways a filter can silently
+ * return nothing are documented once on `utils/conditions.ts`, and `hasMore`'s
+ * tri-state on `ListInfo` in `types.ts`. The whole operator set is verified live
+ * against this endpoint specifically, `endsWith` and `isNot` included.
+ *
+ * SuperOps exposes no single-technician query, so a lookup by id is a
+ * `getTechnicianList` filtered down to one record. An unknown or malformed id
+ * comes back as an empty list rather than an error — which is what keeps the get
+ * tool's not-found branch honest.
  */
 
 import { getClient } from "../client.js";
-import type { DomainTools, Technician, ListInfo } from "../types.js";
+import type {
+  DomainTools,
+  Technician,
+  TechnicianGroup,
+  ListInfo,
+} from "../types.js";
+import { clause, or } from "../utils/conditions.js";
+import { paging, PAGE_PROPERTIES } from "../utils/paging.js";
 
+/**
+ * Every field the real `Technician` type defines. Both the list tool and the
+ * get-by-id tool send this document — the latter with a `userId` condition, since
+ * SuperOps has no single-technician query to send instead.
+ */
 const LIST_TECHNICIANS_QUERY = `
   query getTechnicianList($input: ListInfoInput!) {
     getTechnicianList(input: $input) {
-      technicians {
-        id
+      userList {
+        userId
         name
+        firstName
+        lastName
         email
-        phone
-        isActive
+        contactNumber
+        emailSignature
+        designation
+        businessFunction
+        team
+        reportingManager
         role
-        department
-        teams {
-          id
-          name
-        }
-        ticketCount
-        lastLoginTime
+        groups
       }
       listInfo {
+        page
+        pageSize
         totalCount
-        hasNextPage
-        endCursor
+        hasMore
       }
     }
   }
 `;
 
-const GET_TECHNICIAN_QUERY = `
-  query getTechnician($input: TechnicianIdentifierInput!) {
-    getTechnician(input: $input) {
-      id
+/**
+ * The vocabularies behind a technician's `role`, `team`, `designation`,
+ * `businessFunction` and `groups`. Each of these five queries takes no arguments
+ * and returns a plain list of `{ <name>Id, name }` — those two fields are all the
+ * types define — so they batch into one document.
+ *
+ * Without them a caller holds a role or group *name* and no way to reach the id
+ * that `getTechnicianList` actually filters on.
+ */
+const LIST_TECHNICIAN_LOOKUPS_QUERY = `
+  query getTechnicianLookups {
+    roles: getTechnicianRoleList {
+      roleId
       name
-      email
-      phone
-      isActive
-      role
-      department
-      teams {
-        id
-        name
-      }
-      manager {
-        id
-        name
-        email
-      }
-      skills
-      ticketCount
-      averageResponseTime
-      lastLoginTime
-      createdTime
+    }
+    teams: getTeamList {
+      teamId
+      name
+    }
+    designations: getDesignationList {
+      designationId
+      name
+    }
+    businessFunctions: getBusinessFunctionList {
+      businessFunctionId
+      name
+    }
+    groups: getTechnicianGroupList {
+      groupId
+      name
     }
   }
 `;
 
+/** `getTechnicianGroupList` takes no arguments and returns a plain, unpaginated list. */
 const LIST_TECH_GROUPS_QUERY = `
-  query getTechGroupList($input: ListInfoInput!) {
-    getTechGroupList(input: $input) {
-      techGroups {
-        id
-        name
-        description
-        memberCount
-        members {
-          id
-          name
-        }
-      }
-      listInfo {
-        totalCount
-        hasNextPage
-      }
+  query getTechnicianGroupList {
+    getTechnicianGroupList {
+      groupId
+      name
     }
   }
 `;
-
-interface ExtendedTechnician extends Technician {
-  isActive?: boolean;
-  role?: string;
-  department?: string;
-  teams?: { id: string; name: string }[];
-  manager?: { id: string; name: string; email: string };
-  skills?: string[];
-  ticketCount?: number;
-  averageResponseTime?: number;
-  lastLoginTime?: string;
-  createdTime?: string;
-}
 
 interface ListTechniciansResponse {
   getTechnicianList: {
-    technicians: ExtendedTechnician[];
-    listInfo: ListInfo;
-  };
-}
-
-interface GetTechnicianResponse {
-  getTechnician: ExtendedTechnician;
-}
-
-interface TechGroup {
-  id: string;
-  name: string;
-  description?: string;
-  memberCount?: number;
-  members?: { id: string; name: string }[];
+    userList: Technician[] | null;
+    listInfo: ListInfo | null;
+  } | null;
 }
 
 interface ListTechGroupsResponse {
-  getTechGroupList: {
-    techGroups: TechGroup[];
-    listInfo: ListInfo;
-  };
+  getTechnicianGroupList: TechnicianGroup[] | null;
+}
+
+/** Each lookup list is a plain `{ <name>Id, name }` record. */
+type Lookup = Record<string, string>;
+
+interface TechnicianLookupsResponse {
+  roles: Lookup[] | null;
+  teams: Lookup[] | null;
+  designations: Lookup[] | null;
+  businessFunctions: Lookup[] | null;
+  groups: Lookup[] | null;
 }
 
 export function getTechniciansTools(): DomainTools {
@@ -128,40 +139,42 @@ export function getTechniciansTools(): DomainTools {
       {
         name: "superops_technicians_list",
         description:
-          "List technicians (agents) in SuperOps.ai. Can filter by active status or team.",
+          "List technicians (agents) in SuperOps.ai, sorted by name. Optionally narrow the " +
+          "list with a search term, matched as a substring against both name and email. " +
+          "SuperOps does not expose an active/inactive " +
+          "flag, ticket counts or last-login times for technicians. Each technician's role " +
+          "comes back as {roleId, name} and their groups as an array of {groupId, name}; " +
+          "designation, businessFunction, team and reportingManager are null unless the " +
+          "tenant assigns them. listInfo.hasMore is true when a further page exists and null " +
+          "when it is not — it is never false, so page against totalCount. " +
+          "Use superops_custom_query for filters beyond a name search.",
         inputSchema: {
           type: "object",
           properties: {
-            activeOnly: {
-              type: "boolean",
-              description: "Show only active technicians (default: true)",
-              default: true,
-            },
-            teamId: {
+            search: {
               type: "string",
-              description: "Filter by team/group ID",
+              description:
+                "Substring matched against the technician's name or email address",
             },
-            max: {
-              type: "number",
-              description: "Maximum number of results (default: 50, max: 500)",
-              default: 50,
-            },
-            cursor: {
-              type: "string",
-              description: "Pagination cursor for fetching next page",
-            },
+            ...PAGE_PROPERTIES,
           },
         },
       },
       {
         name: "superops_technicians_get",
-        description: "Get detailed information for a specific technician by their ID.",
+        description:
+          "Get detailed information for a specific technician by their user ID. SuperOps has " +
+          "no single-technician endpoint, so this filters the technician list to that ID. " +
+          "Returns the technician's contact details plus their role as {roleId, name} and " +
+          "their group roster as an array of {groupId, name}; designation, businessFunction, " +
+          "team and reportingManager are null unless the tenant assigns them. Skills, ticket " +
+          "counts and response-time metrics are not available from SuperOps.",
         inputSchema: {
           type: "object",
           properties: {
             technicianId: {
               type: "string",
-              description: "The unique technician ID",
+              description: "The unique technician user ID",
             },
           },
           required: ["technicianId"],
@@ -169,16 +182,30 @@ export function getTechniciansTools(): DomainTools {
       },
       {
         name: "superops_technicians_groups",
-        description: "List technician groups/teams in SuperOps.ai.",
+        description:
+          "List technician groups/teams in SuperOps.ai. Returns every group's ID and name — " +
+          "SuperOps exposes no description, member count or member roster for a group, and " +
+          "the endpoint is neither paginated nor filterable. These are the same groups that " +
+          "appear in a technician's groups field, so a group ID from here identifies the " +
+          "group a technician belongs to.",
         inputSchema: {
           type: "object",
-          properties: {
-            max: {
-              type: "number",
-              description: "Maximum number of results (default: 50)",
-              default: 50,
-            },
-          },
+          properties: {},
+        },
+      },
+      {
+        name: "superops_technicians_lookups",
+        description:
+          "List the roles, teams, designations, business functions and technician groups " +
+          "defined in this SuperOps tenant, each as {id, name}. These are the values a " +
+          "technician's role, team, designation, businessFunction and groups fields refer " +
+          "to. Use this to turn a name a user gave you (\"the Sales team\", \"Admin role\") " +
+          "into the ID SuperOps filters on, then pass that ID to superops_custom_query — " +
+          "getTechnicianList accepts a condition on the role and groups attributes. " +
+          "Takes no arguments.",
+        inputSchema: {
+          type: "object",
+          properties: {},
         },
       },
     ],
@@ -190,24 +217,23 @@ export function getTechniciansTools(): DomainTools {
         switch (name) {
           case "superops_technicians_list": {
             const params = args as {
-              activeOnly?: boolean;
-              teamId?: string;
-              max?: number;
-              cursor?: string;
+              search?: string;
+              page?: number;
+              pageSize?: number;
             };
-
-            const filter: Record<string, unknown> = {};
-            if (params.activeOnly !== false) filter.isActive = true;
-            if (params.teamId) filter.teams = { id: params.teamId };
 
             const response = await client.query<ListTechniciansResponse>(
               LIST_TECHNICIANS_QUERY,
               {
                 input: {
-                  first: Math.min(params.max ?? 50, 500),
-                  ...(params.cursor && { after: params.cursor }),
-                  ...(Object.keys(filter).length > 0 && { filter }),
-                  orderBy: { field: "name", direction: "ASC" },
+                  ...paging(params),
+                  ...(params.search && {
+                    condition: or([
+                      clause("name", "contains", params.search),
+                      clause("email", "contains", params.search),
+                    ]),
+                  }),
+                  sort: [{ attribute: "name", order: "ASC" }],
                 },
               }
             );
@@ -225,36 +251,52 @@ export function getTechniciansTools(): DomainTools {
           case "superops_technicians_get": {
             const { technicianId } = args as { technicianId: string };
 
-            const response = await client.query<GetTechnicianResponse>(GET_TECHNICIAN_QUERY, {
-              input: { id: technicianId },
+            // `userId` + `includes` is the pair verified to resolve a single
+            // technician; `includes` takes an array value.
+            const response = await client.query<ListTechniciansResponse>(LIST_TECHNICIANS_QUERY, {
+              input: {
+                page: 1,
+                pageSize: 1,
+                condition: clause("userId", "includes", [technicianId]),
+              },
             });
+
+            const technician = response.getTechnicianList?.userList?.[0];
+            if (!technician) {
+              return {
+                content: [
+                  { type: "text", text: `No technician found with ID: ${technicianId}` },
+                ],
+                isError: true,
+              };
+            }
+
+            return {
+              content: [{ type: "text", text: JSON.stringify(technician, null, 2) }],
+            };
+          }
+
+          case "superops_technicians_groups": {
+            const response =
+              await client.query<ListTechGroupsResponse>(LIST_TECH_GROUPS_QUERY);
 
             return {
               content: [
                 {
                   type: "text",
-                  text: JSON.stringify(response.getTechnician, null, 2),
+                  text: JSON.stringify(response.getTechnicianGroupList, null, 2),
                 },
               ],
             };
           }
 
-          case "superops_technicians_groups": {
-            const params = args as { max?: number };
-
-            const response = await client.query<ListTechGroupsResponse>(LIST_TECH_GROUPS_QUERY, {
-              input: {
-                first: Math.min(params.max ?? 50, 500),
-              },
-            });
+          case "superops_technicians_lookups": {
+            const response = await client.query<TechnicianLookupsResponse>(
+              LIST_TECHNICIAN_LOOKUPS_QUERY
+            );
 
             return {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify(response.getTechGroupList, null, 2),
-                },
-              ],
+              content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
             };
           }
 

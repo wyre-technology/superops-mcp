@@ -17,8 +17,33 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import type { Domain, DomainTools, ToolDefinition } from "./types.js";
-import { getCredentials } from "./client.js";
+import { getCredentials, getClient } from "./client.js";
 import { registerResourceHandlers } from "./resources.js";
+
+/**
+ * Smallest possible authenticated round-trip, used by superops_test_connection.
+ *
+ * It deliberately does NOT reuse superops_clients_list: that tool elicits a
+ * search term when called without filters, and a connectivity check must never
+ * prompt the user. One client, one field.
+ *
+ * `clients` must be selected even though only the count is reported: asking for
+ * `listInfo` alone is valid GraphQL but makes SuperOps answer 500 Internal
+ * Server Error. Verified against a live tenant — schema validation cannot catch
+ * this, so do not "simplify" the selection set.
+ */
+const PING_QUERY = `
+  query getClientList($input: ListInfoInput!) {
+    getClientList(input: $input) {
+      clients {
+        accountId
+      }
+      listInfo {
+        totalCount
+      }
+    }
+  }
+`;
 
 // Lazy-loaded domain modules
 const domainCache = new Map<Domain, DomainTools>();
@@ -233,20 +258,24 @@ export function createMcpServer(): Server {
       }
 
       try {
-        const clientsTools = await loadDomain("clients");
-        const result = await clientsTools.handleCall("superops_clients_list", {
-          max: 1,
-        });
+        const response = await getClient().query<{
+          getClientList?: {
+            clients?: { accountId?: string }[];
+            listInfo?: { totalCount?: number };
+          };
+        }>(PING_QUERY, { input: { page: 1, pageSize: 1 } });
 
-        if (result.isError) {
-          return result;
-        }
+        const totalCount = response.getClientList?.listInfo?.totalCount;
 
         return {
           content: [
             {
               type: "text",
-              text: `Connection successful!\n\nCredentials configured for:\n- Subdomain: ${creds.subdomain}\n- Region: ${creds.region ?? "us"}\n\nAPI is responding correctly.`,
+              text:
+                `Connection successful!\n\nCredentials configured for:\n` +
+                `- Subdomain: ${creds.subdomain}\n- Region: ${creds.region ?? "us"}\n\n` +
+                `API is responding correctly` +
+                (typeof totalCount === "number" ? ` (${totalCount} clients visible).` : "."),
             },
           ],
         };

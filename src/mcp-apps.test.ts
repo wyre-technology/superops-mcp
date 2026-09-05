@@ -135,21 +135,24 @@ describe("MCP Apps ticket card", () => {
   });
 
   describe("buildTicketCard", () => {
+    // Field names mirror the real SuperOps Ticket type: `displayId` is the
+    // human-facing number, the assigned tech is `technician`, the timestamp is
+    // `updatedTime`, and `category` is a plain string.
     const ticket = {
       ticketId: "ticket-4821",
-      ticketNumber: "TKT-4821",
+      displayId: "TKT-4821",
       subject: "VPN outage — main office",
       description: "<p>Users at the <b>main office</b> cannot connect.</p>",
       status: "Open",
       priority: "High",
       createdTime: "2026-07-17T09:00:00Z",
-      lastUpdatedTime: "2026-07-17T10:30:00Z",
+      updatedTime: "2026-07-17T10:30:00Z",
       client: { accountId: "acct-12", name: "Acme Corp" },
       site: { id: "site-3", name: "Main Office" },
-      requester: { id: "user-9", name: "Pat Lee", email: "pat@acme.example" },
-      assignee: { id: "tech-7", name: "Dana Ruiz", email: "dana@msp.example" },
-      techGroup: { id: "grp-2", name: "Service Desk" },
-      category: { id: "cat-5", name: "Network" },
+      requester: { userId: "user-9", name: "Pat Lee", email: "pat@acme.example" },
+      technician: { userId: "tech-7", name: "Dana Ruiz", email: "dana@msp.example" },
+      techGroup: { groupId: "grp-2", name: "Service Desk" },
+      category: "Network",
     };
 
     it("normalizes labels, names, and dates into the card payload", () => {
@@ -188,7 +191,7 @@ describe("MCP Apps ticket card", () => {
         ticketId: "t-1",
         subject: "Printer down",
         client: { accountId: "acct-9" },
-        assignee: { id: "tech-3" },
+        technician: { userId: "tech-3" },
       };
       const card = buildTicketCard(bare);
       expect(card?.client).toBe("#acct-9");

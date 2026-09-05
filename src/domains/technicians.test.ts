@@ -17,6 +17,38 @@ vi.mock("../client.js", () => ({
 import { getClient } from "../client.js";
 import { getTechniciansTools } from "./technicians.js";
 
+/**
+ * A technician exactly as SuperOps returns one. The JSON-scalar fields carry the
+ * shapes a live tenant actually returns: `role` is `{ roleId, name }`, `groups` is
+ * `[{ groupId, name }]`, and the lookup objects are keyed by their own id field
+ * (`designationId`, `teamId`) rather than a bare `id`.
+ */
+const TECHNICIAN = {
+  userId: "tech-123",
+  name: "Jane Smith",
+  firstName: "Jane",
+  lastName: "Smith",
+  email: "jane@example.com",
+  contactNumber: "+1-555-0100",
+  emailSignature: "Jane Smith, Support",
+  designation: { designationId: "d1", name: "Senior Technician" },
+  businessFunction: null,
+  team: { teamId: "team-1", name: "Support Team" },
+  reportingManager: null,
+  role: { roleId: "r1", name: "Administrator" },
+  groups: [{ groupId: "group-1", name: "Support Team" }],
+};
+
+/**
+ * Operators SuperOps rejects outright on `getTechnicianList` — both come back as an
+ * Internal Server Error, so no tool may ever emit them. The accepted vocabulary is
+ * documented on `utils/conditions.ts`.
+ */
+const REJECTED_OPERATORS = ["equals", "in"];
+
+/** `hasMore` is `true` when a further page exists and `null` — never `false` — when it is not. */
+const LIST_INFO = { page: 1, pageSize: 50, totalCount: 1, hasMore: null };
+
 describe("Technicians Domain", () => {
   let mockClient: { query: ReturnType<typeof vi.fn>; mutate: ReturnType<typeof vi.fn> };
 
@@ -35,11 +67,12 @@ describe("Technicians Domain", () => {
   describe("getTechniciansTools", () => {
     it("returns tools array with expected tools", () => {
       const domain = getTechniciansTools();
-      expect(domain.tools).toHaveLength(3);
+      expect(domain.tools).toHaveLength(4);
       expect(domain.tools.map((t) => t.name)).toEqual([
         "superops_technicians_list",
         "superops_technicians_get",
         "superops_technicians_groups",
+        "superops_technicians_lookups",
       ]);
     });
 
@@ -56,153 +89,111 @@ describe("Technicians Domain", () => {
 
       expect(tool).toBeDefined();
       expect(tool?.description).toContain("List technicians");
-      expect(tool?.inputSchema.properties).toHaveProperty("activeOnly");
-      expect(tool?.inputSchema.properties).toHaveProperty("teamId");
-      expect(tool?.inputSchema.properties).toHaveProperty("max");
-      expect(tool?.inputSchema.properties).toHaveProperty("cursor");
+      expect(tool?.inputSchema.properties).toHaveProperty("search");
+      expect(tool?.inputSchema.properties).toHaveProperty("page");
+      expect(tool?.inputSchema.properties).toHaveProperty("pageSize");
     });
 
-    it("calls query with default parameters (activeOnly: true)", async () => {
-      const mockResponse = {
-        getTechnicianList: {
-          technicians: [
-            { id: "tech-1", name: "John Doe", email: "john@example.com", isActive: true },
-          ],
-          listInfo: { totalCount: 1, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("advertises no fields SuperOps does not have", () => {
+      const domain = getTechniciansTools();
+      const tool = domain.tools.find((t) => t.name === "superops_technicians_list");
+
+      // SuperOps has no active flag and no Relay cursors — these must not come back.
+      expect(tool?.inputSchema.properties).not.toHaveProperty("activeOnly");
+      expect(tool?.inputSchema.properties).not.toHaveProperty("teamId");
+      expect(tool?.inputSchema.properties).not.toHaveProperty("max");
+      expect(tool?.inputSchema.properties).not.toHaveProperty("cursor");
+    });
+
+    it("calls query with default page/pageSize and name sort", async () => {
+      mockClient.query.mockResolvedValue({
+        getTechnicianList: { userList: [TECHNICIAN], listInfo: LIST_INFO },
+      });
 
       const domain = getTechniciansTools();
       const result = await domain.handleCall("superops_technicians_list", {});
 
       expect(mockClient.query).toHaveBeenCalledWith(
         expect.stringContaining("getTechnicianList"),
-        expect.objectContaining({
-          input: expect.objectContaining({
-            first: 50,
-            filter: { isActive: true },
-            orderBy: { field: "name", direction: "ASC" },
-          }),
-        })
+        {
+          input: {
+            page: 1,
+            pageSize: 50,
+            sort: [{ attribute: "name", order: "ASC" }],
+          },
+        }
       );
-      expect(result.content[0].text).toContain("John Doe");
+      expect(result.content[0].text).toContain("Jane Smith");
     });
 
-    it("includes inactive technicians when activeOnly is false", async () => {
-      const mockResponse = {
-        getTechnicianList: {
-          technicians: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
-
-      const domain = getTechniciansTools();
-      await domain.handleCall("superops_technicians_list", { activeOnly: false });
-
-      expect(mockClient.query).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          input: expect.not.objectContaining({
-            filter: expect.objectContaining({ isActive: true }),
-          }),
-        })
-      );
-    });
-
-    it("applies teamId filter", async () => {
-      const mockResponse = {
-        getTechnicianList: {
-          technicians: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
-
-      const domain = getTechniciansTools();
-      await domain.handleCall("superops_technicians_list", { teamId: "team-123" });
-
-      expect(mockClient.query).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          input: expect.objectContaining({
-            filter: expect.objectContaining({
-              teams: { id: "team-123" },
-            }),
-          }),
-        })
-      );
-    });
-
-    it("combines activeOnly and teamId filters", async () => {
-      const mockResponse = {
-        getTechnicianList: {
-          technicians: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
-
-      const domain = getTechniciansTools();
-      await domain.handleCall("superops_technicians_list", {
-        activeOnly: true,
-        teamId: "team-123",
+    it("sends no condition when no search term is given", async () => {
+      mockClient.query.mockResolvedValue({
+        getTechnicianList: { userList: [], listInfo: LIST_INFO },
       });
 
+      const domain = getTechniciansTools();
+      await domain.handleCall("superops_technicians_list", {});
+
+      const variables = mockClient.query.mock.calls[0][1] as {
+        input: Record<string, unknown>;
+      };
+      expect(variables.input).not.toHaveProperty("condition");
+    });
+
+    it("searches name OR email with a compound contains condition", async () => {
+      mockClient.query.mockResolvedValue({
+        getTechnicianList: { userList: [], listInfo: LIST_INFO },
+      });
+
+      const domain = getTechniciansTools();
+      await domain.handleCall("superops_technicians_list", { search: "Jane" });
+
+      // A term the user typed could be either a name or an address; SuperOps
+      // resolves both legs in one request via joinOperator/operands.
       expect(mockClient.query).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
           input: expect.objectContaining({
-            filter: {
-              isActive: true,
-              teams: { id: "team-123" },
+            condition: {
+              joinOperator: "OR",
+              operands: [
+                { attribute: "name", operator: "contains", value: "Jane" },
+                { attribute: "email", operator: "contains", value: "Jane" },
+              ],
             },
           }),
         })
       );
     });
 
-    it("respects max parameter with upper limit of 500", async () => {
-      const mockResponse = {
-        getTechnicianList: {
-          technicians: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("passes page through and clamps pageSize to 100", async () => {
+      mockClient.query.mockResolvedValue({
+        getTechnicianList: { userList: [], listInfo: LIST_INFO },
+      });
 
       const domain = getTechniciansTools();
-      await domain.handleCall("superops_technicians_list", { max: 1000 });
+      await domain.handleCall("superops_technicians_list", { page: 3, pageSize: 1000 });
 
       expect(mockClient.query).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
-          input: expect.objectContaining({
-            first: 500,
-          }),
+          input: expect.objectContaining({ page: 3, pageSize: 100 }),
         })
       );
     });
 
-    it("passes cursor for pagination", async () => {
-      const mockResponse = {
-        getTechnicianList: {
-          technicians: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("uses a custom pageSize within range", async () => {
+      mockClient.query.mockResolvedValue({
+        getTechnicianList: { userList: [], listInfo: LIST_INFO },
+      });
 
       const domain = getTechniciansTools();
-      await domain.handleCall("superops_technicians_list", { cursor: "cursor-abc" });
+      await domain.handleCall("superops_technicians_list", { pageSize: 25 });
 
       expect(mockClient.query).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
-          input: expect.objectContaining({
-            after: "cursor-abc",
-          }),
+          input: expect.objectContaining({ pageSize: 25 }),
         })
       );
     });
@@ -219,34 +210,83 @@ describe("Technicians Domain", () => {
       expect(tool?.inputSchema.required).toContain("technicianId");
     });
 
-    it("calls query with technicianId", async () => {
-      const mockResponse = {
-        getTechnician: {
-          id: "tech-123",
-          name: "Jane Smith",
-          email: "jane@example.com",
-          isActive: true,
-          role: "Senior Technician",
-          teams: [{ id: "team-1", name: "Support Team" }],
-          skills: ["Networking", "Hardware"],
-          ticketCount: 45,
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("describes role and groups by their real shape, not as opaque blobs", () => {
+      const domain = getTechniciansTools();
+      const tool = domain.tools.find((t) => t.name === "superops_technicians_get");
+
+      // SuperOps types these as JSON scalars but returns structured objects; a
+      // caller told they are "opaque" will not read `.name` off them.
+      expect(tool?.description).not.toContain("opaque");
+      expect(tool?.description).toContain("roleId");
+      expect(tool?.description).toContain("groupId");
+    });
+
+    it("filters the technician list by userId and returns the single match", async () => {
+      mockClient.query.mockResolvedValue({
+        getTechnicianList: { userList: [TECHNICIAN], listInfo: LIST_INFO },
+      });
 
       const domain = getTechniciansTools();
       const result = await domain.handleCall("superops_technicians_get", {
         technicianId: "tech-123",
       });
 
-      expect(mockClient.query).toHaveBeenCalledWith(
-        expect.stringContaining("getTechnician"),
-        expect.objectContaining({
-          input: { id: "tech-123" },
-        })
-      );
-      expect(result.content[0].text).toContain("Jane Smith");
-      expect(result.content[0].text).toContain("Senior Technician");
+      expect(mockClient.query).toHaveBeenCalledWith(expect.stringContaining("getTechnicianList"), {
+        input: {
+          page: 1,
+          pageSize: 1,
+          condition: { attribute: "userId", operator: "includes", value: ["tech-123"] },
+        },
+      });
+      // The list wrapper is unwrapped — callers get the technician itself.
+      expect(JSON.parse(result.content[0].text)).toEqual(TECHNICIAN);
+      expect(result.isError).toBeUndefined();
+    });
+
+    it("filters with an operator SuperOps accepts, and an array value for it", async () => {
+      mockClient.query.mockResolvedValue({
+        getTechnicianList: { userList: [TECHNICIAN], listInfo: LIST_INFO },
+      });
+
+      const domain = getTechniciansTools();
+      await domain.handleCall("superops_technicians_get", { technicianId: "tech-123" });
+
+      const { condition } = (mockClient.query.mock.calls[0][1] as {
+        input: { condition: { attribute: string; operator: string; value: unknown } };
+      }).input;
+
+      // `userId` + `includes` is the only pair verified to resolve a single
+      // technician; `includes` requires an array value.
+      expect(condition.attribute).toBe("userId");
+      expect(condition.operator).toBe("includes");
+      expect(Array.isArray(condition.value)).toBe(true);
+      expect(REJECTED_OPERATORS).not.toContain(condition.operator);
+    });
+
+    it("reports a clear not-found when the filtered list is empty", async () => {
+      mockClient.query.mockResolvedValue({
+        getTechnicianList: { userList: [], listInfo: { ...LIST_INFO, totalCount: 0 } },
+      });
+
+      const domain = getTechniciansTools();
+      const result = await domain.handleCall("superops_technicians_get", {
+        technicianId: "nope",
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("No technician found with ID: nope");
+    });
+
+    it("reports not-found when SuperOps returns a null list", async () => {
+      mockClient.query.mockResolvedValue({ getTechnicianList: null });
+
+      const domain = getTechniciansTools();
+      const result = await domain.handleCall("superops_technicians_get", {
+        technicianId: "nope",
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("No technician found");
     });
   });
 
@@ -257,85 +297,86 @@ describe("Technicians Domain", () => {
 
       expect(tool).toBeDefined();
       expect(tool?.description).toContain("technician groups");
-      expect(tool?.inputSchema.properties).toHaveProperty("max");
+      // The SuperOps query takes no arguments, so the tool takes none either.
+      expect(tool?.inputSchema.properties).toEqual({});
+      expect(tool?.inputSchema.required).toBeUndefined();
     });
 
-    it("calls query with default max", async () => {
-      const mockResponse = {
-        getTechGroupList: {
-          techGroups: [
-            {
-              id: "group-1",
-              name: "Support Team",
-              memberCount: 5,
-              members: [
-                { id: "tech-1", name: "John" },
-                { id: "tech-2", name: "Jane" },
-              ],
-            },
-          ],
-          listInfo: { totalCount: 1, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("calls the argument-less group query and returns the plain list", async () => {
+      mockClient.query.mockResolvedValue({
+        getTechnicianGroupList: [{ groupId: "group-1", name: "Support Team" }],
+      });
 
       const domain = getTechniciansTools();
       const result = await domain.handleCall("superops_technicians_groups", {});
 
       expect(mockClient.query).toHaveBeenCalledWith(
-        expect.stringContaining("getTechGroupList"),
-        expect.objectContaining({
-          input: expect.objectContaining({
-            first: 50,
-          }),
-        })
+        expect.stringContaining("getTechnicianGroupList")
       );
-      expect(result.content[0].text).toContain("Support Team");
-      expect(result.content[0].text).toContain("memberCount");
+      expect(mockClient.query.mock.calls[0]).toHaveLength(1);
+      expect(JSON.parse(result.content[0].text)).toEqual([
+        { groupId: "group-1", name: "Support Team" },
+      ]);
+    });
+  });
+
+  describe("superops_technicians_lookups tool", () => {
+    const LOOKUPS = {
+      roles: [{ roleId: "1", name: "Admin" }],
+      teams: [{ teamId: "t1", name: "Sales" }],
+      designations: [{ designationId: "d1", name: "Finance" }],
+      businessFunctions: [{ businessFunctionId: "b1", name: "Admin" }],
+      groups: [{ groupId: "group-1", name: "Support Team" }],
+    };
+
+    it("has correct definition", () => {
+      const domain = getTechniciansTools();
+      const tool = domain.tools.find((t) => t.name === "superops_technicians_lookups");
+
+      expect(tool).toBeDefined();
+      // All five SuperOps lookup queries are argument-less, so the tool is too.
+      expect(tool?.inputSchema.properties).toEqual({});
+      expect(tool?.inputSchema.required).toBeUndefined();
     });
 
-    it("respects max parameter with upper limit of 500", async () => {
-      const mockResponse = {
-        getTechGroupList: {
-          techGroups: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("calls the argument-less lookup query and returns all five vocabularies", async () => {
+      mockClient.query.mockResolvedValue(LOOKUPS);
 
       const domain = getTechniciansTools();
-      await domain.handleCall("superops_technicians_groups", { max: 1000 });
+      const result = await domain.handleCall("superops_technicians_lookups", {});
 
-      expect(mockClient.query).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          input: expect.objectContaining({
-            first: 500,
-          }),
-        })
-      );
+      expect(mockClient.query.mock.calls[0]).toHaveLength(1);
+      expect(JSON.parse(result.content[0].text)).toEqual(LOOKUPS);
+      expect(result.isError).toBeUndefined();
     });
 
-    it("uses custom max when provided", async () => {
-      const mockResponse = {
-        getTechGroupList: {
-          techGroups: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("queries the five real lookup fields under stable aliases", async () => {
+      mockClient.query.mockResolvedValue(LOOKUPS);
 
       const domain = getTechniciansTools();
-      await domain.handleCall("superops_technicians_groups", { max: 25 });
+      await domain.handleCall("superops_technicians_lookups", {});
 
-      expect(mockClient.query).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          input: expect.objectContaining({
-            first: 25,
-          }),
-        })
-      );
+      const queryArg = mockClient.query.mock.calls[0][0] as string;
+      for (const field of [
+        "getTechnicianRoleList",
+        "getTeamList",
+        "getDesignationList",
+        "getBusinessFunctionList",
+        // Groups ride along here so a caller never has to make a second call
+        // just to turn a group name into the ID getTechnicianList filters on.
+        "getTechnicianGroupList",
+      ]) {
+        expect(queryArg).toContain(field);
+      }
+      // Each type defines exactly its own id plus name — nothing else to select.
+      for (const alias of ["roles:", "teams:", "designations:", "businessFunctions:", "groups:"]) {
+        expect(queryArg).toContain(alias);
+      }
+      for (const id of ["roleId", "teamId", "designationId", "businessFunctionId", "groupId"]) {
+        expect(queryArg).toContain(id);
+      }
+      expect(queryArg).not.toContain("$input");
+      expect(queryArg).not.toContain("listInfo");
     });
   });
 
@@ -372,109 +413,122 @@ describe("Technicians Domain", () => {
   });
 
   describe("GraphQL query structure", () => {
-    it("LIST_TECHNICIANS_QUERY includes expected fields", async () => {
-      const mockResponse = {
-        getTechnicianList: {
-          technicians: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    /** Fields SuperOps' Technician type does not define. */
+    const INVENTED_TECHNICIAN_FIELDS = [
+      "isActive",
+      "department",
+      "teams",
+      "manager",
+      "skills",
+      "ticketCount",
+      "averageResponseTime",
+      "lastLoginTime",
+      "phone",
+    ];
+
+    /** Relay-style pagination SuperOps does not implement. */
+    const INVENTED_PAGINATION_FIELDS = ["hasNextPage", "endCursor"];
+
+    it("LIST_TECHNICIANS_QUERY selects the real Technician fields", async () => {
+      mockClient.query.mockResolvedValue({
+        getTechnicianList: { userList: [], listInfo: LIST_INFO },
+      });
 
       const domain = getTechniciansTools();
       await domain.handleCall("superops_technicians_list", {});
 
-      const queryArg = mockClient.query.mock.calls[0][0];
-      expect(queryArg).toContain("id");
-      expect(queryArg).toContain("name");
-      expect(queryArg).toContain("email");
-      expect(queryArg).toContain("isActive");
-      expect(queryArg).toContain("teams");
-      expect(queryArg).toContain("ticketCount");
+      const queryArg = mockClient.query.mock.calls[0][0] as string;
+      expect(queryArg).toContain("userList");
+      expect(queryArg).toContain("userId");
+      expect(queryArg).toContain("contactNumber");
+      expect(queryArg).toContain("hasMore");
+      expect(queryArg).not.toContain("technicians {");
+      for (const field of [...INVENTED_TECHNICIAN_FIELDS, ...INVENTED_PAGINATION_FIELDS]) {
+        expect(queryArg).not.toContain(field);
+      }
     });
 
-    it("GET_TECHNICIAN_QUERY includes detailed fields", async () => {
-      const mockResponse = {
-        getTechnician: { id: "1", name: "Test" },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("selects JSON scalar fields bare, with no subselection", async () => {
+      mockClient.query.mockResolvedValue({
+        getTechnicianList: { userList: [], listInfo: LIST_INFO },
+      });
 
       const domain = getTechniciansTools();
-      await domain.handleCall("superops_technicians_get", { technicianId: "1" });
+      await domain.handleCall("superops_technicians_list", {});
 
-      const queryArg = mockClient.query.mock.calls[0][0];
-      expect(queryArg).toContain("skills");
-      expect(queryArg).toContain("manager");
-      expect(queryArg).toContain("averageResponseTime");
+      const queryArg = mockClient.query.mock.calls[0][0] as string;
+      for (const scalar of [
+        "designation",
+        "businessFunction",
+        "team",
+        "reportingManager",
+        "role",
+        "groups",
+      ]) {
+        expect(queryArg).toContain(scalar);
+        expect(queryArg).not.toMatch(new RegExp(`${scalar}\\s*\\{`));
+      }
     });
 
-    it("LIST_TECH_GROUPS_QUERY includes members", async () => {
-      const mockResponse = {
-        getTechGroupList: {
-          techGroups: [],
-          listInfo: { totalCount: 0, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("resolves get-by-id through a filtered getTechnicianList, not a getTechnician", async () => {
+      mockClient.query.mockResolvedValue({
+        getTechnicianList: { userList: [TECHNICIAN], listInfo: LIST_INFO },
+      });
+
+      const domain = getTechniciansTools();
+      await domain.handleCall("superops_technicians_get", { technicianId: "tech-123" });
+
+      const queryArg = mockClient.query.mock.calls[0][0] as string;
+      expect(queryArg).toContain("getTechnicianList(input: $input)");
+      expect(queryArg).not.toMatch(/getTechnician\(/);
+      expect(queryArg).not.toContain("TechnicianIdentifierInput");
+      for (const field of [...INVENTED_TECHNICIAN_FIELDS, ...INVENTED_PAGINATION_FIELDS]) {
+        expect(queryArg).not.toContain(field);
+      }
+    });
+
+    it("LIST_TECH_GROUPS_QUERY selects only groupId and name", async () => {
+      mockClient.query.mockResolvedValue({ getTechnicianGroupList: [] });
 
       const domain = getTechniciansTools();
       await domain.handleCall("superops_technicians_groups", {});
 
-      const queryArg = mockClient.query.mock.calls[0][0];
-      expect(queryArg).toContain("members");
-      expect(queryArg).toContain("memberCount");
-      expect(queryArg).toContain("description");
+      const queryArg = mockClient.query.mock.calls[0][0] as string;
+      expect(queryArg).toContain("getTechnicianGroupList");
+      expect(queryArg).toContain("groupId");
+      expect(queryArg).toContain("name");
+      expect(queryArg).not.toContain("getTechGroupList");
+      expect(queryArg).not.toContain("listInfo");
+      for (const field of ["description", "memberCount", "members", "$input"]) {
+        expect(queryArg).not.toContain(field);
+      }
     });
   });
 
   describe("Response format", () => {
-    it("returns JSON stringified response for list", async () => {
-      const mockResponse = {
-        getTechnicianList: {
-          technicians: [{ id: "1", name: "Test Tech" }],
-          listInfo: { totalCount: 1, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("returns the JSON stringified list payload", async () => {
+      const payload = { userList: [TECHNICIAN], listInfo: LIST_INFO };
+      mockClient.query.mockResolvedValue({ getTechnicianList: payload });
 
       const domain = getTechniciansTools();
       const result = await domain.handleCall("superops_technicians_list", {});
 
       expect(result.content).toHaveLength(1);
       expect(result.content[0].type).toBe("text");
-      const parsed = JSON.parse(result.content[0].text);
-      expect(parsed).toEqual(mockResponse.getTechnicianList);
+      expect(JSON.parse(result.content[0].text)).toEqual(payload);
     });
 
-    it("returns JSON stringified response for get", async () => {
-      const mockResponse = {
-        getTechnician: { id: "1", name: "Test Tech", email: "test@example.com" },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
-
-      const domain = getTechniciansTools();
-      const result = await domain.handleCall("superops_technicians_get", {
-        technicianId: "1",
-      });
-
-      const parsed = JSON.parse(result.content[0].text);
-      expect(parsed).toEqual(mockResponse.getTechnician);
-    });
-
-    it("returns JSON stringified response for groups", async () => {
-      const mockResponse = {
-        getTechGroupList: {
-          techGroups: [{ id: "1", name: "Support" }],
-          listInfo: { totalCount: 1, hasNextPage: false },
-        },
-      };
-      mockClient.query.mockResolvedValue(mockResponse);
+    it("returns the JSON stringified group list", async () => {
+      const groups = [
+        { groupId: "1", name: "Support" },
+        { groupId: "2", name: "Field" },
+      ];
+      mockClient.query.mockResolvedValue({ getTechnicianGroupList: groups });
 
       const domain = getTechniciansTools();
       const result = await domain.handleCall("superops_technicians_groups", {});
 
-      const parsed = JSON.parse(result.content[0].text);
-      expect(parsed).toEqual(mockResponse.getTechGroupList);
+      expect(JSON.parse(result.content[0].text)).toEqual(groups);
     });
   });
 });

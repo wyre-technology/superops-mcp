@@ -5,7 +5,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { SuperOpsCredentials, GraphQLResponse } from "./types.js";
+import type { SuperOpsCredentials, GraphQLResponse, GraphQLError } from "./types.js";
 
 const API_ENDPOINTS = {
   us: "https://api.superops.ai/msp",
@@ -83,11 +83,23 @@ export class SuperOpsClient {
     const result = (await response.json()) as GraphQLResponse<T>;
 
     if (result.errors && result.errors.length > 0) {
-      const error = result.errors[0];
+      // Report every error, not just the first. GraphQL returns all validation
+      // failures for a document at once, so surfacing errors[0] alone made a
+      // query with ten bad fields look like a single-field problem and sent
+      // debugging down the wrong path (issue: "phone field rejected").
+      const [first] = result.errors;
+      const message =
+        result.errors.length === 1
+          ? first.message
+          : `${result.errors.length} GraphQL errors:\n${result.errors
+              .map((e) => `  - ${e.message}`)
+              .join("\n")}`;
+
       throw new SuperOpsError(
-        error.message,
-        error.extensions?.code,
-        error.extensions?.retryAfter
+        message,
+        first.extensions?.code,
+        first.extensions?.retryAfter,
+        result.errors
       );
     }
 
@@ -109,12 +121,20 @@ export class SuperOpsClient {
 export class SuperOpsError extends Error {
   readonly code?: string;
   readonly retryAfter?: number;
+  /** Every error GraphQL reported for the request, in order. */
+  readonly errors: GraphQLError[];
 
-  constructor(message: string, code?: string, retryAfter?: number) {
+  constructor(
+    message: string,
+    code?: string,
+    retryAfter?: number,
+    errors: GraphQLError[] = []
+  ) {
     super(message);
     this.name = "SuperOpsError";
     this.code = code;
     this.retryAfter = retryAfter;
+    this.errors = errors;
   }
 }
 

@@ -96,7 +96,7 @@ Add to your `claude_desktop_config.json`:
 
 - `superops_clients_list` - List clients with filters
 - `superops_clients_get` - Get client details
-- `superops_clients_search` - Search clients by name/domain
+- `superops_clients_search` - Search clients by name
 
 ### Tickets Domain
 
@@ -143,6 +143,65 @@ Here are the open high priority tickets...
 ## Rate Limits
 
 SuperOps.ai API has a rate limit of 800 requests per minute per API token.
+
+## Pagination
+
+SuperOps uses page-based pagination, not cursors. List tools take `page`
+(1-indexed, default 1) and `pageSize` (default 50, max 100), and return a
+`listInfo` block with `page`, `pageSize`, `totalCount` and `hasMore`.
+
+**`hasMore` is tri-state:** `true` when another page exists, `null` — never
+`false` — when it does not. Loop on `hasMore === true`, or page off
+`totalCount`; looping until `hasMore === false` never terminates.
+
+## Filtering
+
+Filters are `condition` clauses of `{ attribute, operator, value }`, and they
+compose — `{ joinOperator: "and" | "or", operands: [ … ] }` nests recursively.
+Operators verified against a live tenant:
+
+| Operator | Value |
+|---|---|
+| `is`, `isNot`, `contains`, `notContains`, `startsWith`, `endsWith` | string |
+| `includes`, `notIncludes` | array |
+
+`equals` and `in` are rejected by the API. `includes` matches a value *whole*
+while `contains` matches a substring — filtering an OS platform with
+`includes: ["Windows"]` matches nothing, because SuperOps stores
+`"Microsoft Windows 10 Pro"`.
+
+Two things to know, because neither reports an error:
+
+- Filtering on a value outside a field's real set returns **zero rows, not an
+  error**. An empty result may mean a bad value, not an empty tenant.
+- Filtering on a JSON column (`software`) rather than a path into it
+  (`software.name`) also returns **zero rows silently**.
+
+Use `superops_custom_query` for filter semantics the standard tools don't
+express.
+
+## Schema conformance
+
+`schema/superops.graphql` is a vendored copy of the SuperOps GraphQL schema:
+
+```bash
+# Authoritative — generated from live introspection
+SUPEROPS_API_TOKEN=... SUPEROPS_SUBDOMAIN=... node scripts/fetch-schema.mjs
+
+# No credentials? Falls back to scraping the published API reference
+node scripts/fetch-schema.mjs
+```
+
+Prefer introspection, and note the committed schema is already the introspected
+one. The published docs declare 276 types / 76 queries / 63 mutations where the
+live API reports **404 / 116 / 83**, omit deprecations entirely, and declare two
+types that do not exist live (`FieldType`, `TicketType`) — validating against
+those would pass documents the API rejects.
+
+`src/domains/graphql-schema.test.ts` validates every GraphQL document in `src/`
+against it on each `npm test`, so a query referencing a field SuperOps does not
+define fails in CI rather than at runtime. Regenerate the schema after a
+SuperOps API change and re-run the tests.
 
 ## License
 
