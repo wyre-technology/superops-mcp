@@ -24,21 +24,15 @@
  *    below advertises an `enum` — and a wrong one would fail *silently*, since
  *    an out-of-range value returns zero rows rather than an error.
  *
- * Filter semantics, established against a live tenant:
- *
- *  - Array-valued operators: `includes`, `notIncludes`.
- *  - Scalar-valued operators: `is`, `isNot`, `contains`, `notContains`,
- *    `startsWith`, `endsWith`. All matching is case-insensitive.
- *  - `equals` and `in` are rejected outright, as is any unknown attribute or
- *    operator.
- *  - Conditions compose: `RuleConditionInput` is recursive via `joinOperator`
- *    and `operands`. See `combineConditions` for the uppercase-`"AND"` trap.
- *  - Filtering a JSON-scalar column by its bare name silently matches nothing;
- *    the nested path is required (`software.name`, not `software`).
+ * Filters are built with `clause`/`and` from `../utils/conditions.js`, which
+ * owns the operator vocabulary, the uppercase-`"AND"` trap and the two ways a
+ * filter silently matches nothing; `RuleConditionInput` in `../types.js` is the
+ * recursive shape they produce.
  */
 
 import { getClient } from "../client.js";
 import type { DomainTools, Asset, AssetSoftware, ListInfo, PatchData } from "../types.js";
+import { clause, and } from "../utils/conditions.js";
 import { paging, PAGE_PROPERTIES } from "../utils/paging.js";
 
 const LIST_ASSETS_QUERY = `
@@ -183,46 +177,6 @@ interface GetPatchesResponse {
   };
 }
 
-/** A leaf `RuleConditionInput` clause. */
-interface Clause {
-  attribute: string;
-  operator: string;
-  value: unknown;
-}
-
-/** A compound `RuleConditionInput` joining leaf clauses. */
-interface CompoundCondition {
-  joinOperator: "AND" | "OR";
-  operands: Clause[];
-}
-
-type Condition = Clause | CompoundCondition;
-
-/**
- * Join the supplied filters into one `RuleConditionInput`.
- *
- * `RuleConditionInput` is recursive — `joinOperator` plus `operands` — so
- * several filters do combine, contrary to the published docs. A lone clause is
- * sent bare rather than wrapped in a one-operand compound.
- *
- * The join token is deliberately uppercase. Verified live: `"AND"` intersects,
- * but lowercase `"and"` is silently treated as OR — it *widens* the result set
- * instead of erroring, so a filtered call quietly returns rows that match only
- * one of the filters. `"OR"` and `"or"` both mean OR, so only AND is exposed to
- * this trap.
- *
- * `attribute` and `operator` are validated by SuperOps at runtime, not by the
- * GraphQL schema: an unsupported one is an API error, while a *valid* attribute
- * filtered on an out-of-range value returns zero rows with no error at all.
- * `superops_custom_query` is the escape hatch for anything this cannot express.
- */
-function combineConditions(candidates: (Clause | undefined)[]): Condition | undefined {
-  const clauses = candidates.filter((c): c is Clause => c !== undefined);
-  if (clauses.length === 0) return undefined;
-  if (clauses.length === 1) return clauses[0];
-  return { joinOperator: "AND", operands: clauses };
-}
-
 export function getAssetsTools(): DomainTools {
   return {
     tools: [
@@ -352,18 +306,12 @@ export function getAssetsTools(): DomainTools {
               pageSize?: number;
             };
 
-            const condition = combineConditions([
-              params.status
-                ? { attribute: "status", operator: "includes", value: [params.status] }
-                : undefined,
+            const condition = and([
+              params.status ? clause("status", "includes", [params.status]) : undefined,
               // `includes` would demand the whole OS string ("Microsoft Windows 10 Pro"),
               // which no caller can guess; `contains` matches the fragment they do know.
-              params.platform
-                ? { attribute: "platform", operator: "contains", value: params.platform }
-                : undefined,
-              params.clientId
-                ? { attribute: "client", operator: "includes", value: [params.clientId] }
-                : undefined,
+              params.platform ? clause("platform", "contains", params.platform) : undefined,
+              params.clientId ? clause("client", "includes", [params.clientId]) : undefined,
             ]);
 
             const response = await client.query<ListAssetsResponse>(LIST_ASSETS_QUERY, {
@@ -409,13 +357,11 @@ export function getAssetsTools(): DomainTools {
               pageSize?: number;
             };
 
-            const condition = combineConditions([
-              // `software` is a JSON object; filtering on the bare column matches
-              // nothing at all rather than erroring, so the name path is required.
-              params.search
-                ? { attribute: "software.name", operator: "contains", value: params.search }
-                : undefined,
-            ]);
+            // `software` is a JSON object; filtering on the bare column matches
+            // nothing at all rather than erroring, so the name path is required.
+            const condition = params.search
+              ? clause("software.name", "contains", params.search)
+              : undefined;
 
             const response = await client.query<GetSoftwareResponse>(GET_ASSET_SOFTWARE_QUERY, {
               input: {
@@ -446,16 +392,12 @@ export function getAssetsTools(): DomainTools {
               pageSize?: number;
             };
 
-            const condition = combineConditions([
+            const condition = and([
               params.installationStatus
-                ? {
-                    attribute: "installationStatus",
-                    operator: "includes",
-                    value: [params.installationStatus],
-                  }
+                ? clause("installationStatus", "includes", [params.installationStatus])
                 : undefined,
               params.severity?.length
-                ? { attribute: "severity", operator: "includes", value: params.severity }
+                ? clause("severity", "includes", params.severity)
                 : undefined,
             ]);
 

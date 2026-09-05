@@ -89,64 +89,6 @@ describe("Clients Domain", () => {
     },
   });
 
-  /** Every `joinOperator` appearing anywhere in a condition tree. */
-  const joinOperatorsIn = (condition: unknown): string[] => {
-    if (condition === null || typeof condition !== "object") return [];
-    const node = condition as { joinOperator?: unknown; operands?: unknown };
-    const here = typeof node.joinOperator === "string" ? [node.joinOperator] : [];
-    const below = Array.isArray(node.operands) ? node.operands.flatMap(joinOperatorsIn) : [];
-    return [...here, ...below];
-  };
-
-  /**
-   * SuperOps silently ignores an unrecognised `joinOperator` and ORs the
-   * operands instead — lowercase "and" returns a superset with no error. Every
-   * compound we emit must therefore be uppercase.
-   */
-  const expectUppercaseJoins = (condition: unknown) => {
-    const joins = joinOperatorsIn(condition);
-    expect(joins.length).toBeGreaterThan(0);
-    for (const join of joins) {
-      expect(join, `joinOperator ${join} must be uppercase`).toBe(join.toUpperCase());
-      expect(["AND", "OR"]).toContain(join);
-    }
-  };
-
-  describe("joinOperator casing", () => {
-    it.each([
-      ["superops_clients_search", { query: "acme" }],
-      ["superops_clients_list", { stage: "Active", status: "Paid" }],
-    ])("%s emits only uppercase joinOperators", async (tool, args) => {
-      mockClient.query.mockResolvedValue(listResponse());
-
-      await getClientsTools().handleCall(tool, args);
-
-      expectUppercaseJoins(mockClient.query.mock.calls[0][1].input.condition);
-    });
-
-    it("emits an uppercase OR on the elicited search path", async () => {
-      vi.mocked(elicitText).mockResolvedValue("acme");
-      mockClient.query.mockResolvedValue(listResponse());
-
-      await getClientsTools().handleCall("superops_clients_list", {});
-
-      expectUppercaseJoins(mockClient.query.mock.calls[0][1].input.condition);
-    });
-
-    it("rejects the lowercase spelling that silently degrades to OR", async () => {
-      mockClient.query.mockResolvedValue(listResponse());
-
-      await getClientsTools().handleCall("superops_clients_list", {
-        stage: "Active",
-        status: "Paid",
-      });
-
-      const serialized = JSON.stringify(mockClient.query.mock.calls[0][1].input.condition);
-      expect(serialized).not.toContain('"and"');
-      expect(serialized).not.toContain('"or"');
-    });
-  });
-
   describe("getClientsTools", () => {
     it("returns tools array with expected tools", () => {
       const domain = getClientsTools();
@@ -182,37 +124,58 @@ describe("Clients Domain", () => {
       expect(tool?.inputSchema.properties.pageSize).toMatchObject({ default: 50 });
     });
 
-    /** The `enum` advertised for one property of `superops_clients_list`. */
-    const advertisedEnum = (property: string): string[] | undefined => {
-      const tool = getClientsTools().tools.find((t) => t.name === "superops_clients_list");
-      const schema = tool?.inputSchema.properties[property] as { enum?: string[] } | undefined;
-      return schema?.enum;
-    };
+    /** One property of the `superops_clients_list` input schema. */
+    const listProperty = (property: string): Record<string, unknown> =>
+      getClientsTools().tools.find((t) => t.name === "superops_clients_list")?.inputSchema
+        .properties[property] as Record<string, unknown>;
 
-    it("advertises the stage values the live API actually accepts", () => {
-      expect(advertisedEnum("stage")).toEqual(CLIENT_STAGES);
+    const describedFor = (property: string): string =>
+      String(listProperty(property).description ?? "");
+
+    it("documents stage and status without pinning them to a JSON Schema enum", () => {
+      // Both are per-tenant lookup lists typed as plain String. An `enum` would
+      // reject at the MCP boundary a value the tenant configured and the API
+      // would have accepted; a wrong value only costs an empty result.
+      expect(listProperty("stage")).not.toHaveProperty("enum");
+      expect(listProperty("status")).not.toHaveProperty("enum");
     });
 
-    it("advertises the status values the live API actually accepts", () => {
-      expect(advertisedEnum("status")).toEqual(CLIENT_STATUSES);
+    it("documents the stage values the live API actually accepts", () => {
+      for (const stage of CLIENT_STAGES) {
+        expect(describedFor("stage")).toContain(stage);
+      }
     });
 
-    it("does not advertise stage values that belong to no SuperOps stage", () => {
+    it("documents the status values the live API actually accepts", () => {
+      for (const status of CLIENT_STATUSES) {
+        expect(describedFor("status")).toContain(status);
+      }
+    });
+
+    it("documents no stage value that belongs to no SuperOps stage", () => {
       // The pre-live guesses. Each silently matched zero clients.
       for (const bogus of ["Lead", "Customer", "Churned"]) {
-        expect(advertisedEnum("stage")).not.toContain(bogus);
+        expect(describedFor("stage")).not.toContain(bogus);
       }
       // `Archived` was guessed for status; SuperOps has no such value.
-      expect(advertisedEnum("status")).not.toContain("Archived");
+      expect(describedFor("status")).not.toContain("Archived");
     });
 
     it("keeps stage and status vocabularies disjoint", () => {
-      const stages = advertisedEnum("stage") ?? [];
-      const statuses = advertisedEnum("status") ?? [];
+      // `Active`/`Inactive` are stages. Offering one as a status was the
+      // original bug and would filter nothing. The status description may name
+      // a stage, but only as a status's parent ("... belong to stage Active").
+      for (const stage of CLIENT_STAGES) {
+        expect(describedFor("status")).not.toMatch(new RegExp(`(?<!stage )\\b${stage}\\b`, "i"));
+      }
+      for (const status of CLIENT_STATUSES) {
+        expect(describedFor("stage")).not.toContain(status);
+      }
+    });
 
-      // `Active`/`Inactive` are stages. Advertising them as statuses was the
-      // original bug and would filter nothing.
-      expect(statuses.filter((s) => stages.includes(s))).toEqual([]);
+    it("records that a status is scoped to its parent stage", () => {
+      expect(describedFor("status")).toContain("sub-state of stage");
+      expect(describedFor("status")).toContain("matches nothing");
     });
 
     it("calls query with default page/pageSize and name sort", async () => {
@@ -283,21 +246,6 @@ describe("Clients Domain", () => {
           { attribute: "status", operator: "includes", value: ["Paid"] },
         ],
       });
-    });
-
-    it("neither filter is dropped when both are given", async () => {
-      mockClient.query.mockResolvedValue(listResponse());
-
-      const domain = getClientsTools();
-      await domain.handleCall("superops_clients_list", {
-        status: "Paid",
-        stage: "Active",
-      });
-
-      // The old build kept only one clause, silently widening the result set.
-      const serialized = JSON.stringify(mockClient.query.mock.calls[0][1].input.condition);
-      expect(serialized).toContain("stage");
-      expect(serialized).toContain("status");
     });
 
     it("does not wrap a lone clause in a pointless compound", async () => {

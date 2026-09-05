@@ -3,10 +3,10 @@
  *
  * Tests for asset (endpoint) management tools.
  *
- * These assert the *shape* of what we send SuperOps: page/pageSize offsets,
- * a single `RuleConditionInput` filter clause, and JSON-scalar fields selected
- * bare. graphql-schema.test.ts separately validates the documents against the
- * real schema.
+ * These assert the *shape* of what we send SuperOps: page/pageSize offsets, the
+ * `RuleConditionInput` filters built by utils/conditions, and JSON-scalar fields
+ * selected bare. graphql-schema.test.ts separately validates the documents
+ * against the real schema.
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
@@ -675,11 +675,13 @@ describe("Assets Domain", () => {
      * clients domain shipped when it claimed a Lead/Prospect/Customer/Churned
      * stage against a tenant using Active/Inactive/Prospect.
      */
-    const VALUE_FIELDS: [string, string][] = [
-      ["superops_assets_list", "status"],
-      ["superops_assets_list", "platform"],
-      ["superops_assets_patches", "installationStatus"],
-      ["superops_assets_patches", "severity"],
+    // Tool, field, and the values seen on a live tenant — recorded so a caller
+    // has something to go on without the schema pretending the set is closed.
+    const VALUE_FIELDS: [string, string, string[]][] = [
+      ["superops_assets_list", "status", ["ONLINE", "OFFLINE"]],
+      ["superops_assets_list", "platform", ["Microsoft Windows 10 Pro", "darwin"]],
+      ["superops_assets_patches", "installationStatus", ["Installed", "NewOrMissing"]],
+      ["superops_assets_patches", "severity", ["Others", "Recommended"]],
     ];
 
     it.each(VALUE_FIELDS)("%s.%s advertises no enum", (toolName, field) => {
@@ -693,25 +695,19 @@ describe("Assets Domain", () => {
       expect(prop.items ?? {}, `${toolName}.${field} items`).not.toHaveProperty("enum");
     });
 
-    it.each(VALUE_FIELDS)("%s.%s documents the values observed live", (toolName, field) => {
-      const tool = getAssetsTools().tools.find((t) => t.name === toolName);
-      const prop = (tool?.inputSchema.properties as Record<string, { description?: string }>)[
-        field
-      ];
+    it.each(VALUE_FIELDS)(
+      "%s.%s documents the values observed live",
+      (toolName, field, observed) => {
+        const tool = getAssetsTools().tools.find((t) => t.name === toolName);
+        const prop = (tool?.inputSchema.properties as Record<string, { description?: string }>)[
+          field
+        ];
 
-      // Observed on a live tenant; recorded so a caller has something to go on
-      // without the schema pretending the set is closed.
-      const observed: Record<string, string[]> = {
-        status: ["ONLINE", "OFFLINE"],
-        platform: ["Microsoft Windows 10 Pro", "darwin"],
-        installationStatus: ["Installed", "NewOrMissing"],
-        severity: ["Others", "Recommended"],
-      };
-
-      for (const value of observed[field]) {
-        expect(prop.description, `${toolName}.${field}`).toContain(value);
+        for (const value of observed) {
+          expect(prop.description, `${toolName}.${field}`).toContain(value);
+        }
       }
-    });
+    );
 
     it("does not describe patch severity in Windows CVSS terms it never returns", () => {
       const tool = getAssetsTools().tools.find((t) => t.name === "superops_assets_patches");
@@ -731,62 +727,6 @@ describe("Assets Domain", () => {
       expect(tool?.description).toContain("hasMore");
       expect(tool?.description).toContain("null");
       expect(tool?.description).toContain("totalCount");
-    });
-  });
-
-  describe("Compound filter conditions", () => {
-    /**
-     * SuperOps silently treats any joinOperator it does not recognise — including
-     * lowercase "and" — as OR, with no error. A regression here does not fail
-     * loudly; it quietly returns a SUPERSET of the rows the caller asked for.
-     *
-     * Live, on identical operands [status includes ONLINE, platform contains
-     * Windows] against a 3-asset tenant:
-     *   "AND"    -> 1   (the one online Windows box)
-     *   "OR"     -> 3
-     *   "and"    -> 3   (silently OR)
-     *   "banana" -> 3   (silently OR)
-     */
-    const COMPOUND_CASES: [string, Record<string, unknown>][] = [
-      [
-        "superops_assets_list",
-        { status: "ONLINE", platform: "Windows", clientId: "client-1" },
-      ],
-      [
-        "superops_assets_patches",
-        { assetId: "a-1", installationStatus: "Installed", severity: ["Others"] },
-      ],
-    ];
-
-    it.each(COMPOUND_CASES)("%s emits an uppercase AND join", async (toolName, args) => {
-      mockClient.query.mockResolvedValue({});
-      await getAssetsTools().handleCall(toolName, args);
-
-      const input = (mockClient.query.mock.calls[0][1] as { input: Record<string, unknown> })
-        .input;
-      const listInfo = input.listInfo as Record<string, unknown> | undefined;
-      const condition = (listInfo?.condition ?? input.condition) as {
-        joinOperator: string;
-        operands: unknown[];
-      };
-
-      expect(condition.joinOperator).toBe("AND");
-      // Not merely uppercase-insensitively equal — the exact token matters.
-      expect(condition.joinOperator).not.toBe("and");
-      expect(condition.operands.length).toBeGreaterThan(1);
-    });
-
-    it("never emits a join token SuperOps would silently reduce to OR", async () => {
-      mockClient.query.mockResolvedValue({});
-      await getAssetsTools().handleCall("superops_assets_list", {
-        status: "ONLINE",
-        platform: "Windows",
-      });
-
-      const serialised = JSON.stringify(mockClient.query.mock.calls[0][1]);
-      for (const bad of ['"joinOperator":"and"', '"joinOperator":"or"']) {
-        expect(serialised, bad).not.toContain(bad);
-      }
     });
   });
 });

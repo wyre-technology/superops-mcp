@@ -79,8 +79,18 @@
   when `SUPEROPS_API_TOKEN` and `SUPEROPS_SUBDOMAIN` are set — authoritative,
   since it is what the server will actually answer — and falls back to scraping
   the published API reference otherwise, so CI and outside contributors can
-  still regenerate without credentials. Prefer introspection: the published docs
-  lag the live API, listing ~76 queries where introspection reports ~108.
+  still regenerate without credentials. The committed schema is now the
+  introspected one.
+
+  Prefer introspection: measured against the live API, the published docs
+  declare 276 types / 76 queries / 63 mutations where introspection reports
+  **404 / 116 / 83**. Every operation the docs declare does exist, so the
+  scrape is a safe subset — but two *types* they declare do not: `FieldType`
+  (live: `CustomFieldType`) and `TicketType` (live: `Ticket.ticketType` is a
+  plain `String`, not an enum). Validating against those would have passed
+  documents the API rejects, so the scrape path now repoints and drops them.
+  The docs also omit deprecations entirely — 9 queries and 5 mutations are
+  deprecated-but-served, which only introspection reveals.
 
 ### Fixed
 
@@ -121,14 +131,12 @@
   against a live SuperOps tenant. Tool names are unchanged, but list tools now
   take `page`/`pageSize` instead of `max`/`cursor`.
 
-- **`superops_tickets_add_note` called a mutation that does not exist.** Live
-  introspection lists 78 mutations and none of them is `createTicketNote`, so
-  every call would have failed. Notes go through
-  `createNote(input: CreateNoteInput!)`, addressed by
+- **`superops_tickets_add_note` used a deprecated mutation.** `createTicketNote`
+  is still served, but carries `@deprecated(reason: "Use createNote")`. Notes
+  now go through `createNote(input: CreateNoteInput!)`, addressed by
   `workItem { workId, module: TICKET }` rather than `ticket { ticketId }`.
-  Offline conformance missed this because the vendored schema was scraped from
-  the published docs, which declare the phantom mutation — see the schema note
-  under Added.
+  (SuperOps deprecates rather than removes: `createClient`, `createWorklog` and
+  `createServiceItem` are all still live behind newer replacements.)
 
 - **`getTicketList` returned nothing unless `ticketId` was selected.** Omitting
   `ticketId` from the selection set yields an empty `tickets` array alongside a

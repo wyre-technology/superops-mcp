@@ -41,12 +41,13 @@ const TECHNICIAN = {
 
 /**
  * Operators SuperOps rejects outright on `getTechnicianList` — both come back as an
- * Internal Server Error, so no tool may ever emit them. Verified live alongside the
- * accepted set (`is`, `contains`, `startsWith` with a string; `includes` with an array).
+ * Internal Server Error, so no tool may ever emit them. The accepted vocabulary is
+ * documented on `utils/conditions.ts`.
  */
 const REJECTED_OPERATORS = ["equals", "in"];
 
-const LIST_INFO = { page: 1, pageSize: 50, totalCount: 1, hasMore: false };
+/** `hasMore` is `true` when a further page exists and `null` — never `false` — when it is not. */
+const LIST_INFO = { page: 1, pageSize: 50, totalCount: 1, hasMore: null };
 
 describe("Technicians Domain", () => {
   let mockClient: { query: ReturnType<typeof vi.fn>; mutate: ReturnType<typeof vi.fn> };
@@ -163,60 +164,6 @@ describe("Technicians Domain", () => {
           }),
         })
       );
-    });
-
-    it("uses operators and value types SuperOps accepts in every search clause", async () => {
-      mockClient.query.mockResolvedValue({
-        getTechnicianList: { userList: [], listInfo: LIST_INFO },
-      });
-
-      const domain = getTechniciansTools();
-      await domain.handleCall("superops_technicians_list", { search: "Jane" });
-
-      const { condition } = (mockClient.query.mock.calls[0][1] as {
-        input: { condition: { operands: { operator: string; value: unknown }[] } };
-      }).input;
-
-      for (const clause of condition.operands) {
-        // `contains` takes a bare string; an array value here is a server error.
-        expect(typeof clause.value).toBe("string");
-        expect(REJECTED_OPERATORS).not.toContain(clause.operator);
-      }
-    });
-
-    it("sends joinOperator uppercase, which SuperOps validates by silence", async () => {
-      mockClient.query.mockResolvedValue({
-        getTechnicianList: { userList: [], listInfo: LIST_INFO },
-      });
-
-      const domain = getTechniciansTools();
-      await domain.handleCall("superops_technicians_list", { search: "Jane" });
-
-      const { condition } = (mockClient.query.mock.calls[0][1] as {
-        input: { condition: { joinOperator: string } };
-      }).input;
-
-      // A joinOperator SuperOps does not recognise is not rejected — it silently
-      // becomes OR. Lowercase would still return the right rows for this tool and
-      // hide the bug, so assert the exact casing rather than a case-insensitive match.
-      expect(condition.joinOperator).toBe("OR");
-    });
-
-    it("never wraps a lone clause in a compound envelope", async () => {
-      mockClient.query.mockResolvedValue({
-        getTechnicianList: { userList: [], listInfo: LIST_INFO },
-      });
-
-      const domain = getTechniciansTools();
-      await domain.handleCall("superops_technicians_list", { search: "Jane" });
-
-      const { condition } = (mockClient.query.mock.calls[0][1] as {
-        input: { condition: { operands?: unknown[] } };
-      }).input;
-
-      // Two clauses here, so a compound is right — but it must carry every clause
-      // it wraps. A single-operand envelope would mean the collapse rule broke.
-      expect(condition.operands).toHaveLength(2);
     });
 
     it("passes page through and clamps pageSize to 100", async () => {
@@ -379,6 +326,7 @@ describe("Technicians Domain", () => {
       teams: [{ teamId: "t1", name: "Sales" }],
       designations: [{ designationId: "d1", name: "Finance" }],
       businessFunctions: [{ businessFunctionId: "b1", name: "Admin" }],
+      groups: [{ groupId: "group-1", name: "Support Team" }],
     };
 
     it("has correct definition", () => {
@@ -386,12 +334,12 @@ describe("Technicians Domain", () => {
       const tool = domain.tools.find((t) => t.name === "superops_technicians_lookups");
 
       expect(tool).toBeDefined();
-      // All four SuperOps lookup queries are argument-less, so the tool is too.
+      // All five SuperOps lookup queries are argument-less, so the tool is too.
       expect(tool?.inputSchema.properties).toEqual({});
       expect(tool?.inputSchema.required).toBeUndefined();
     });
 
-    it("calls the argument-less lookup query and returns all four vocabularies", async () => {
+    it("calls the argument-less lookup query and returns all five vocabularies", async () => {
       mockClient.query.mockResolvedValue(LOOKUPS);
 
       const domain = getTechniciansTools();
@@ -402,7 +350,7 @@ describe("Technicians Domain", () => {
       expect(result.isError).toBeUndefined();
     });
 
-    it("queries the four real lookup fields under stable aliases", async () => {
+    it("queries the five real lookup fields under stable aliases", async () => {
       mockClient.query.mockResolvedValue(LOOKUPS);
 
       const domain = getTechniciansTools();
@@ -414,14 +362,17 @@ describe("Technicians Domain", () => {
         "getTeamList",
         "getDesignationList",
         "getBusinessFunctionList",
+        // Groups ride along here so a caller never has to make a second call
+        // just to turn a group name into the ID getTechnicianList filters on.
+        "getTechnicianGroupList",
       ]) {
         expect(queryArg).toContain(field);
       }
       // Each type defines exactly its own id plus name — nothing else to select.
-      for (const alias of ["roles:", "teams:", "designations:", "businessFunctions:"]) {
+      for (const alias of ["roles:", "teams:", "designations:", "businessFunctions:", "groups:"]) {
         expect(queryArg).toContain(alias);
       }
-      for (const id of ["roleId", "teamId", "designationId", "businessFunctionId"]) {
+      for (const id of ["roleId", "teamId", "designationId", "businessFunctionId", "groupId"]) {
         expect(queryArg).toContain(id);
       }
       expect(queryArg).not.toContain("$input");
@@ -519,7 +470,7 @@ describe("Technicians Domain", () => {
       }
     });
 
-    it("GET_TECHNICIAN_QUERY is a filtered getTechnicianList, not getTechnician", async () => {
+    it("resolves get-by-id through a filtered getTechnicianList, not a getTechnician", async () => {
       mockClient.query.mockResolvedValue({
         getTechnicianList: { userList: [TECHNICIAN], listInfo: LIST_INFO },
       });

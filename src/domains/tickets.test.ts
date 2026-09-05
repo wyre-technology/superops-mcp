@@ -5,9 +5,9 @@
  *
  * The GraphQL documents themselves are validated against the vendored schema
  * by graphql-schema.test.ts; these tests cover the request shapes the handlers
- * build — page/pageSize pagination, the single-condition filter, the
- * JSON-scalar identifier inputs, and the note/worklog mutations that replaced
- * the invented addTicketNote/addTicketTimeEntry pair.
+ * build — page/pageSize pagination, the filter conditions, the JSON-scalar
+ * identifier inputs, and the note/worklog mutations that replaced the invented
+ * addTicketNote/addTicketTimeEntry pair.
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
@@ -261,49 +261,6 @@ describe("Tickets Domain", () => {
           { attribute: "technician", operator: "includes", value: ["tech-456"] },
         ],
       });
-    });
-
-    it("combines exactly two filters under an AND", async () => {
-      mockClient.query.mockResolvedValue(emptyList);
-
-      const domain = getTicketsTools();
-      await domain.handleCall("superops_tickets_list", {
-        status: ["Open", "On Hold"],
-        clientId: "client-123",
-      });
-
-      const [, variables] = mockClient.query.mock.calls[0] as [
-        string,
-        { input: { condition?: unknown } },
-      ];
-      expect(variables.input.condition).toEqual({
-        joinOperator: "AND",
-        operands: [
-          { attribute: "status", operator: "includes", value: ["Open", "On Hold"] },
-          { attribute: "client", operator: "includes", value: ["client-123"] },
-        ],
-      });
-    });
-
-    /**
-     * An unrecognised joinOperator — including lowercase "and" — is silently
-     * treated as OR by the API, returning a superset with no error. Pin the
-     * exact casing.
-     */
-    it("emits an uppercase joinOperator, which lowercase would silently turn into OR", async () => {
-      mockClient.query.mockResolvedValue(emptyList);
-
-      const domain = getTicketsTools();
-      await domain.handleCall("superops_tickets_list", {
-        status: ["Open"],
-        priority: ["High"],
-      });
-
-      const [, variables] = mockClient.query.mock.calls[0] as [
-        string,
-        { input: { condition?: { joinOperator?: string } } },
-      ];
-      expect(variables.input.condition?.joinOperator).toBe("AND");
     });
 
     it("sends a bare leaf condition, not a join, for a single filter", async () => {
@@ -691,11 +648,12 @@ describe("Tickets Domain", () => {
     });
 
     /**
-     * The Mutation type has no `createTicketNote` field on the live API, even
-     * though the schema still declares one. Sending it fails at the API, so
-     * pin the mutation this tool actually issues.
+     * `createTicketNote` still exists on the live API, but it is deprecated
+     * with `reason: "Use createNote"` — plain introspection hides it, and only
+     * `fields(includeDeprecated: true)` reports it. Pin the supported mutation
+     * this tool issues so it cannot drift back onto the deprecated one.
      */
-    it("uses createNote, not the non-existent createTicketNote", async () => {
+    it("uses createNote, not the deprecated createTicketNote", async () => {
       mockClient.mutate.mockResolvedValue({ createNote: { noteId: "note-123" } });
 
       const domain = getTicketsTools();
@@ -731,7 +689,7 @@ describe("Tickets Domain", () => {
     });
 
     it("never sends the invented isPublic field to the API", async () => {
-      mockClient.mutate.mockResolvedValue({ createTicketNote: { noteId: "note-123" } });
+      mockClient.mutate.mockResolvedValue({ createNote: { noteId: "note-123" } });
 
       const domain = getTicketsTools();
       await domain.handleCall("superops_tickets_add_note", {

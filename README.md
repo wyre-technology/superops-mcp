@@ -192,8 +192,11 @@ SUPEROPS_API_TOKEN=... SUPEROPS_SUBDOMAIN=... node scripts/fetch-schema.mjs
 node scripts/fetch-schema.mjs
 ```
 
-Prefer introspection. The published docs lag the live API — they list ~76
-queries where introspection reports ~108.
+Prefer introspection, and note the committed schema is already the introspected
+one. The published docs declare 276 types / 76 queries / 63 mutations where the
+live API reports **404 / 116 / 83**, omit deprecations entirely, and declare two
+types that do not exist live (`FieldType`, `TicketType`) — validating against
+those would pass documents the API rejects.
 
 `src/domains/graphql-schema.test.ts` validates every GraphQL document in `src/`
 against it on each `npm test`, so a query referencing a field SuperOps does not

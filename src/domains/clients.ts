@@ -17,23 +17,24 @@
  *   Prospect → New, Negotiation, Won, Lost
  *   Inactive → (no status options)
  *
- * Filtering on an unrecognised value is not an error — it silently matches
- * nothing — so the enums advertised below must stay in step with that list.
+ * Those values are named in the tool descriptions rather than pinned as a JSON
+ * Schema `enum`: the lists are tenant configuration, so an `enum` would reject
+ * at the MCP boundary a value the API would have accepted. Getting a value
+ * wrong is recoverable — filtering on an unrecognised one is not an error, it
+ * silently matches nothing.
+ *
+ * Filter conditions come from `../utils/conditions.js`, which documents the
+ * operator vocabulary and the uppercase-`joinOperator` trap.
  *
  * `listInfo.hasMore` is `true` when further pages exist and `null` on the last
  * page. SuperOps never returns `false`, so treat any falsy value as "no more".
  */
 
 import { getClient } from "../client.js";
-import type {
-  DomainTools,
-  Client,
-  ListInfo,
-  ListInfoInput,
-  RuleConditionInput,
-} from "../types.js";
+import type { DomainTools, Client, ListInfo, ListInfoInput } from "../types.js";
+import { clause, and, or } from "../utils/conditions.js";
 import { elicitText } from "../utils/elicitation.js";
-import { pageOf, pageSizeOf, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "../utils/paging.js";
+import { paging, PAGE_PROPERTIES } from "../utils/paging.js";
 
 const LIST_CLIENTS_QUERY = `
   query getClientList($input: ListInfoInput!) {
@@ -107,54 +108,19 @@ interface GetClientResponse {
   getClient: Client;
 }
 
-/**
- * `RuleConditionInput` is recursive: a clause is either a leaf
- * (`attribute`/`operator`/`value`) or a branch (`joinOperator` + `operands`).
- * Branches nest, so filters are not limited to one clause.
- *
- * Operators verified against the live `getClientList`:
- *   array value  — `includes`, `notIncludes`
- *   string value — `is`, `isNot`, `contains`, `notContains`, `startsWith`,
- *                  `endsWith`
- * `equals` and `in` are rejected with a 500. The set is attribute-agnostic:
- * every accepted operator works on both `name` and `stage`.
- *
- * `joinOperator` is CASE-SENSITIVE and must be `"AND"` / `"OR"`. Anything the
- * API does not recognise — lowercase `"and"` included — silently falls back to
- * OR rather than erroring, so a lowercase `"and"` returns a *union* and looks
- * like a working filter that quietly over-matches. Verified live: uppercase
- * `"AND"` on stage=Active + status=New returns 0 rows (correct — no Active
- * client can hold a Prospect status), while lowercase `"and"` returns all 3.
- *
- * A tenant needing anything else should use `superops_custom_query`.
- */
-function condition(attribute: string, operator: string, value: unknown): RuleConditionInput {
-  return { attribute, operator, value };
-}
+/** Appended to the stage/status descriptions, to flag the lists as per-tenant. */
+const TENANT_CAVEAT = "Your tenant may rename or extend this list.";
 
 /**
- * Combine leaf clauses under one join. A single clause is returned bare — the
- * API treats a lone operand the same either way, and an unwrapped clause keeps
- * the request readable.
+ * Match a search term against the client name or any of its email domains.
+ *
+ * Both operands are always present, so `or()` never returns `undefined` here.
  */
-function join(
-  joinOperator: "AND" | "OR",
-  clauses: RuleConditionInput[]
-): RuleConditionInput | undefined {
-  if (clauses.length === 0) return undefined;
-  if (clauses.length === 1) return clauses[0];
-  return { joinOperator, operands: clauses };
-}
-
-/** Match a search term against the client name or any of its email domains. */
-function nameOrEmailDomain(query: string): RuleConditionInput {
-  return {
-    joinOperator: "OR",
-    operands: [
-      condition("name", "contains", query),
-      condition("emailDomains", "contains", query),
-    ],
-  };
+function nameOrEmailDomain(query: string) {
+  return or([
+    clause("name", "contains", query),
+    clause("emailDomains", "contains", query),
+  ]);
 }
 
 export function getClientsTools(): DomainTools {
@@ -174,26 +140,15 @@ export function getClientsTools(): DomainTools {
                 "Filter by status. Status is a sub-state of stage: Paid and Unpaid belong to " +
                 "stage Active; New, Negotiation, Won and Lost belong to stage Prospect. " +
                 "Stage Inactive has no statuses. Pairing a status with a stage it does not " +
-                "belong to matches nothing.",
-              enum: ["Paid", "Unpaid", "New", "Negotiation", "Won", "Lost"],
+                `belong to matches nothing. ${TENANT_CAVEAT}`,
             },
             stage: {
               type: "string",
               description:
                 "Filter by stage: Active, Inactive, or Prospect. Combined with status if both " +
-                "are given.",
-              enum: ["Active", "Inactive", "Prospect"],
+                `are given. ${TENANT_CAVEAT}`,
             },
-            page: {
-              type: "number",
-              description: "1-indexed page number (default: 1)",
-              default: 1,
-            },
-            pageSize: {
-              type: "number",
-              description: `Results per page (default: ${DEFAULT_PAGE_SIZE}, max: ${MAX_PAGE_SIZE})`,
-              default: DEFAULT_PAGE_SIZE,
-            },
+            ...PAGE_PROPERTIES,
           },
         },
       },
@@ -223,16 +178,7 @@ export function getClientsTools(): DomainTools {
               type: "string",
               description: "Substring to match against the client name or any of its email domains",
             },
-            page: {
-              type: "number",
-              description: "1-indexed page number (default: 1)",
-              default: 1,
-            },
-            pageSize: {
-              type: "number",
-              description: `Results per page (default: ${DEFAULT_PAGE_SIZE}, max: ${MAX_PAGE_SIZE})`,
-              default: DEFAULT_PAGE_SIZE,
-            },
+            ...PAGE_PROPERTIES,
           },
           required: ["query"],
         },
@@ -252,8 +198,7 @@ export function getClientsTools(): DomainTools {
               pageSize?: number;
             };
 
-            const page = pageOf(params.page);
-            const pageSize = pageSizeOf(params.pageSize);
+            const { page, pageSize } = paging(params);
 
             // If no filters provided, elicit a search term from the user.
             const hasFilters = Boolean(params.status || params.stage);
@@ -291,14 +236,10 @@ export function getClientsTools(): DomainTools {
               pageSize,
               sort: [{ attribute: "name", order: "ASC" }],
             };
-            const clauses: RuleConditionInput[] = [];
-            if (params.stage) {
-              clauses.push(condition("stage", "includes", [params.stage]));
-            }
-            if (params.status) {
-              clauses.push(condition("status", "includes", [params.status]));
-            }
-            const filter = join("AND", clauses);
+            const filter = and([
+              params.stage ? clause("stage", "includes", [params.stage]) : undefined,
+              params.status ? clause("status", "includes", [params.status]) : undefined,
+            ]);
             if (filter) {
               input.condition = filter;
             }
@@ -338,8 +279,7 @@ export function getClientsTools(): DomainTools {
             const params = args as { query: string; page?: number; pageSize?: number };
 
             const input: ListInfoInput = {
-              page: pageOf(params.page),
-              pageSize: pageSizeOf(params.pageSize),
+              ...paging(params),
               condition: nameOrEmailDomain(params.query),
               sort: [{ attribute: "name", order: "ASC" }],
             };

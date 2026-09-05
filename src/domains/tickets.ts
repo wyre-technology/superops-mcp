@@ -15,8 +15,8 @@
  * alongside a correct, filter-aware `listInfo.totalCount` — no error, just
  * silently no data. Keep `ticketId` in LIST_TICKETS_QUERY.
  *
- * `listInfo.hasMore` is `true` when further pages exist and `null` — never
- * `false` — when they do not.
+ * Filter conditions are built with `utils/conditions.ts`, which documents the
+ * operator vocabulary and the uppercase-`joinOperator` trap.
  */
 
 import { getClient } from "../client.js";
@@ -27,10 +27,10 @@ import type {
   WorklogEntry,
   ListInfo,
   ListInfoInput,
-  RuleConditionInput,
 } from "../types.js";
 import { elicitText } from "../utils/elicitation.js";
-import { pageOf, pageSizeOf, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "../utils/paging.js";
+import { and, clause } from "../utils/conditions.js";
+import { paging, PAGE_PROPERTIES } from "../utils/paging.js";
 import { buildTicketCard, TICKET_CARD_META } from "../card.builder.js";
 
 const LIST_TICKETS_QUERY = `
@@ -135,13 +135,14 @@ const UPDATE_TICKET_MUTATION = `
 `;
 
 /**
- * Notes are created through `createNote`, NOT `createTicketNote`. The schema
- * still declares a `createTicketNote(input: CreateTicketNoteInput!)` field and
- * the `CreateTicketNoteInput` type, so offline validation accepts both — but
- * live introspection of the Mutation type lists only `createNote`, and calling
- * `createTicketNote` fails at the API. `createNote` addresses its target the
- * same way worklog entries do, through `workItem { workId module }`, rather
- * than through a ticket-specific `ticket { ticketId }`.
+ * Notes are created through `createNote`. The older
+ * `createTicketNote(input: CreateTicketNoteInput!)` still exists and still
+ * works, but the live API marks it deprecated with `reason: "Use createNote"` —
+ * which is why plain introspection hides it and only
+ * `__type { fields(includeDeprecated: true) }` reports it. `createNote`
+ * addresses its target the same way worklog entries do, through
+ * `workItem { workId module }`, rather than a ticket-specific
+ * `ticket { ticketId }`.
  */
 const CREATE_NOTE_MUTATION = `
   mutation createNote($input: CreateNoteInput!) {
@@ -235,43 +236,6 @@ const STOCK_CATEGORIES = "Database, Hardware, Help, Network, Software";
 /** Appended to any description naming a stock list, to flag it as per-tenant. */
 const TENANT_CAVEAT = "Your tenant may rename or extend this list.";
 
-/**
- * SuperOps validates the `attribute`/`operator` strings at runtime — the schema
- * types them as plain `String`, so a bad pair fails at the API, not at query
- * validation. Confirmed live: `is`, `isNot`, `contains`, `notContains`,
- * `startsWith` and `endsWith` take a string value; `includes` and `notIncludes`
- * take an array. `equals` and `in` are rejected with a 500.
- *
- * The four attributes this domain filters on — `status`, `priority`, `client`
- * and `technician` — are all confirmed live against `getTicketList` with
- * `includes` and an array value. They are flat attribute names: the nested
- * forms (`client.accountId`, `technician.userId`) are NOT what the API wants,
- * even though the ticket reads those objects back with those keys.
- *
- * Filtering on a value outside the tenant's configured set is NOT an error —
- * it returns `totalCount: 0`. A wrong value looks like "no results", so the
- * tool descriptions name the real value sets rather than guessing.
- */
-function condition(attribute: string, operator: string, value: unknown): RuleConditionInput {
-  return { attribute, operator, value };
-}
-
-/**
- * `RuleConditionInput` is recursive: a clause is either a leaf
- * (attribute/operator/value) or a join (`joinOperator` + `operands`), so
- * several filters can be combined in one request.
- *
- * `joinOperator` is CASE-SENSITIVE, and getting it wrong fails silently.
- * Verified live: `"AND"` intersects, but lowercase `"and"` is not recognized
- * and falls back to a union — it returns a superset with no error. Always
- * emit uppercase.
- */
-function all(clauses: RuleConditionInput[]): RuleConditionInput | undefined {
-  if (clauses.length === 0) return undefined;
-  if (clauses.length === 1) return clauses[0];
-  return { joinOperator: "AND", operands: clauses };
-}
-
 export function getTicketsTools(): DomainTools {
   return {
     tools: [
@@ -307,16 +271,7 @@ export function getTicketsTools(): DomainTools {
               type: "string",
               description: "Filter by assigned technician user ID",
             },
-            page: {
-              type: "number",
-              description: "1-indexed page number (default: 1)",
-              default: 1,
-            },
-            pageSize: {
-              type: "number",
-              description: `Results per page (default: ${DEFAULT_PAGE_SIZE}, max: ${MAX_PAGE_SIZE})`,
-              default: DEFAULT_PAGE_SIZE,
-            },
+            ...PAGE_PROPERTIES,
           },
         },
       },
@@ -358,9 +313,7 @@ export function getTicketsTools(): DomainTools {
             source: {
               type: "string",
               description: "How the ticket originated (default: INTEGRATION)",
-              // The full TicketSource enum as the live API declares it. The
-              // previous list stopped at INTEGRATION and rejected the last
-              // four, which are valid.
+              // The full TicketSource enum as the live API declares it.
               enum: [
                 "FORM",
                 "AGENT",
@@ -606,29 +559,27 @@ export function getTicketsTools(): DomainTools {
               }
             }
 
-            // Every supplied filter is applied. Within one filter the values
-            // are OR'd by `includes`; the filters are then AND'd together.
-            const clauses: RuleConditionInput[] = [];
-            if (params.status?.length) {
-              clauses.push(condition("status", "includes", params.status));
-            }
-            if (params.priority?.length) {
-              clauses.push(condition("priority", "includes", params.priority));
-            }
-            if (params.clientId) {
-              clauses.push(condition("client", "includes", [params.clientId]));
-            }
-            if (params.technicianId) {
-              clauses.push(condition("technician", "includes", [params.technicianId]));
-            }
+            // Every supplied filter is applied: values within one filter are
+            // OR'd by `includes`, then the filters are AND'd together. All four
+            // attributes are flat names, confirmed live against getTicketList —
+            // NOT the nested `client.accountId` / `technician.userId` paths the
+            // ticket reads those objects back under.
+            const condition = and([
+              params.status?.length ? clause("status", "includes", params.status) : undefined,
+              params.priority?.length
+                ? clause("priority", "includes", params.priority)
+                : undefined,
+              params.clientId ? clause("client", "includes", [params.clientId]) : undefined,
+              params.technicianId
+                ? clause("technician", "includes", [params.technicianId])
+                : undefined,
+            ]);
 
             const input: ListInfoInput = {
-              page: pageOf(params.page),
-              pageSize: pageSizeOf(params.pageSize),
+              ...paging(params),
+              ...(condition && { condition }),
               sort: [{ attribute: "createdTime", order: "DESC" }],
             };
-            const filter = all(clauses);
-            if (filter) input.condition = filter;
 
             const response = await client.query<ListTicketsResponse>(LIST_TICKETS_QUERY, {
               input,

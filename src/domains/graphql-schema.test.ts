@@ -16,7 +16,18 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
-import { buildSchema, parse, validate, specifiedRules } from "graphql";
+import {
+  buildSchema,
+  parse,
+  validate,
+  specifiedRules,
+  visit,
+  visitWithTypeInfo,
+  TypeInfo,
+  getNamedType,
+  isObjectType,
+  Kind,
+} from "graphql";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const srcRoot = join(here, "..");
@@ -113,5 +124,48 @@ describe("GraphQL schema conformance", () => {
 
     const errors = validate(schema, parse(op.body), specifiedRules);
     expect(errors.map((e) => e.message)).toEqual([]);
+  });
+
+  /**
+   * SuperOps list wrappers misbehave when the row collection is left out, and
+   * neither failure is a GraphQL error — so validation alone cannot catch them:
+   *
+   *   getClientList { listInfo { totalCount } }   -> HTTP 500
+   *   getTicketList { tickets { subject } … }     -> [] with a correct
+   *                                                  filter-aware totalCount,
+   *                                                  unless ticketId is selected
+   *
+   * Both were found by hand against a live tenant and were being defended by
+   * "do not simplify this" comments. This asserts the general rule instead: any
+   * selection on a `listInfo`-bearing wrapper must also select its row
+   * collection, with at least one field.
+   */
+  it.each(operations)("$file :: $name selects the rows, not just listInfo", (op) => {
+    const typeInfo = new TypeInfo(schema);
+    const offenders: string[] = [];
+
+    visit(
+      parse(op.body),
+      visitWithTypeInfo(typeInfo, {
+        [Kind.SELECTION_SET](node) {
+          const parent = getNamedType(typeInfo.getParentType() ?? undefined);
+          if (!isObjectType(parent) || !parent.getFields().listInfo) return;
+
+          const selected = new Set(
+            node.selections
+              .filter((s) => s.kind === Kind.FIELD)
+              .map((s) => (s as { name: { value: string } }).name.value)
+          );
+          if (!selected.has("listInfo")) return;
+
+          const rows = Object.keys(parent.getFields()).filter((f) => f !== "listInfo");
+          if (!rows.some((f) => selected.has(f))) {
+            offenders.push(`${parent.name} selects listInfo but none of: ${rows.join(", ")}`);
+          }
+        },
+      })
+    );
+
+    expect(offenders).toEqual([]);
   });
 });
