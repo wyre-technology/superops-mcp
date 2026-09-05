@@ -16,6 +16,7 @@ import {
   PAGE_PROPERTIES,
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
+  MAX_PAGE,
 } from "./paging.js";
 
 describe("pageOf", () => {
@@ -44,6 +45,13 @@ describe("pageOf", () => {
   it("falls back to 1 for non-finite input", () => {
     expect(pageOf(Number.NaN)).toBe(1);
     expect(pageOf(Number.POSITIVE_INFINITY)).toBe(1);
+  });
+
+  it("clamps to the signed 32-bit ceiling GraphQL Int allows", () => {
+    // Past this, the request fails variable coercion before it is even sent.
+    expect(pageOf(MAX_PAGE)).toBe(MAX_PAGE);
+    expect(pageOf(MAX_PAGE + 1)).toBe(MAX_PAGE);
+    expect(pageOf(Number.MAX_SAFE_INTEGER)).toBe(MAX_PAGE);
   });
 });
 
@@ -87,11 +95,22 @@ describe("paging", () => {
     expect(paging({ page: 3.7, pageSize: 10.9 })).toEqual({ page: 3, pageSize: 10 });
   });
 
-  it("only ever emits integers, so SuperOps' Int coercion cannot fail", () => {
-    for (const input of [{ page: 2.5 }, { pageSize: 7.5 }, { page: -3, pageSize: 0.2 }]) {
+  it("only ever emits in-range integers, so Int coercion cannot fail", () => {
+    const inputs = [
+      { page: 2.5 },
+      { pageSize: 7.5 },
+      { page: -3, pageSize: 0.2 },
+      { page: Number.MAX_SAFE_INTEGER, pageSize: Number.MAX_SAFE_INTEGER },
+      { page: Number.NaN, pageSize: Number.NaN },
+    ];
+    for (const input of inputs) {
       const result = paging(input);
-      expect(Number.isInteger(result.page)).toBe(true);
-      expect(Number.isInteger(result.pageSize)).toBe(true);
+      for (const value of [result.page, result.pageSize]) {
+        expect(Number.isInteger(value)).toBe(true);
+        expect(value).toBeGreaterThanOrEqual(1);
+        expect(value).toBeLessThanOrEqual(MAX_PAGE);
+      }
+      expect(result.pageSize).toBeLessThanOrEqual(MAX_PAGE_SIZE);
     }
   });
 });

@@ -11,10 +11,17 @@
 export const DEFAULT_PAGE_SIZE = 50;
 export const MAX_PAGE_SIZE = 100;
 
-/** 1-based page number, truncated to an integer and floored at 1. */
+/**
+ * GraphQL `Int` is a signed 32-bit integer, so anything past this fails
+ * variable coercion before the request is even sent.
+ */
+export const MAX_PAGE = 2_147_483_647;
+
+/** 1-based page number, truncated to an integer and clamped to [1, MAX_PAGE]. */
 export function pageOf(page?: number): number {
   const value = Math.trunc(page ?? 1);
-  return Number.isFinite(value) ? Math.max(value, 1) : 1;
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(Math.max(value, 1), MAX_PAGE);
 }
 
 /** Page size, truncated to an integer and clamped to [1, MAX_PAGE_SIZE]. */
@@ -36,7 +43,7 @@ export function paging(params: { page?: number; pageSize?: number }): {
 export const PAGE_PROPERTIES = {
   page: {
     type: "number",
-    description: "Page number, 1-based (default: 1)",
+    description: `Page number, 1-based (default: 1, max: ${MAX_PAGE})`,
     default: 1,
   },
   pageSize: {
