@@ -24,8 +24,20 @@ const schema = buildSchema(
   readFileSync(join(srcRoot, "..", "schema", "superops.graphql"), "utf8")
 );
 
-/** `const FOO_QUERY = ` … ` ` — the shape every operation in this repo uses. */
-const TEMPLATE = /const\s+([A-Z0-9_]+)\s*=\s*`([\s\S]*?)`;/g;
+/**
+ * Every backtick template literal in the file, with the name of the `const` it
+ * is assigned to when there is one.
+ *
+ * Deliberately NOT anchored to `const UPPER_SNAKE = ...`: an operation declared
+ * with a lowercase name, built inside a function, or passed inline to
+ * `client.query()` would then never be collected, and the suite would still go
+ * green while that query was unvalidated — the exact blind spot that let the
+ * original schema mismatch ship.
+ */
+const TEMPLATE = /(?:const\s+(\w+)\s*=\s*)?`([\s\S]*?)`/g;
+
+/** A document must OPEN with `query Name`/`mutation Name` to be one of ours. */
+const IS_OPERATION = /^\s*(?:query|mutation)\s+\w/;
 
 interface Operation {
   file: string;
@@ -48,11 +60,12 @@ function collectOperations(): Operation[] {
   const found: Operation[] = [];
   for (const path of sourceFiles(srcRoot)) {
     const source = readFileSync(path, "utf8");
-    for (const [, name, body] of source.matchAll(TEMPLATE)) {
-      if (!/\b(query|mutation)\s+\w/.test(body)) continue;
+    for (const [, constName, body] of source.matchAll(TEMPLATE)) {
+      if (!IS_OPERATION.test(body)) continue;
       found.push({
         file: relative(srcRoot, path),
-        name,
+        // Fall back to the operation name for an anonymous/inline document.
+        name: constName ?? body.trim().split(/[\s({]/)[1] ?? "<inline>",
         body,
         interpolated: body.includes("${"),
       });
@@ -68,6 +81,27 @@ describe("GraphQL schema conformance", () => {
     // Guards against the regex silently matching nothing after a refactor,
     // which would make every assertion below vacuously pass.
     expect(operations.length).toBeGreaterThan(0);
+  });
+
+  it("collects an operation from every file that talks to the API", () => {
+    // A file can call query()/mutate() only with a document, so one that sends
+    // requests but contributes no validated operation means collection missed
+    // it — the suite would stay green over an unchecked query.
+    //
+    // Two files legitimately send no static document:
+    //   client.ts   — defines query()/mutate() themselves; it is the transport.
+    //   custom.ts   — superops_custom_query/_mutation forward a caller-supplied
+    //                 string, which cannot be known until runtime.
+    const NO_STATIC_DOCUMENT = new Set(["client.ts", "domains/custom.ts"]);
+
+    const covered = new Set(operations.map((op) => op.file));
+    const senders = sourceFiles(srcRoot)
+      .filter((path) => /\.(?:query|mutate)[<(]/.test(readFileSync(path, "utf8")))
+      .map((path) => relative(srcRoot, path))
+      .filter((file) => !NO_STATIC_DOCUMENT.has(file));
+
+    expect(senders.length).toBeGreaterThan(0);
+    expect(senders.filter((file) => !covered.has(file))).toEqual([]);
   });
 
   it.each(operations)("$file :: $name is valid against the SuperOps schema", (op) => {
